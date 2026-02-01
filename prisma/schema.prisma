@@ -172,3 +172,77 @@ model NewsCache {
   @@index([category])
   @@index([fetchedAt])
 }
+
+// ============================================
+// RESEARCH, STRATEGY & ANALYSIS MODELS
+// ============================================
+
+// Betting Strategy
+model Strategy {
+  id              String   @id @default(cuid())
+  name            String
+  description     String?
+  type            String   @default("value") // value, arbitrage, hedge, momentum
+  parameters      Json     // Kelly fraction, confidence threshold, etc.
+  categories      String[] @default([])  // Politics, Economics, Sports, etc.
+  maxBetSize      Int      @default(100)
+  dailyLimit      Float    @default(500)
+  isActive        Boolean  @default(false)
+  backtestResults Json?    // { roi: %, winRate: %, brier: n }
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+// Trade Journal for reflection
+model TradeJournal {
+  id            String   @id @default(cuid())
+  marketTicker  String
+  marketTitle   String
+  side          String   // yes, no
+  contracts     Int
+  entryPrice    Float
+  exitPrice     Float?
+  outcome       String?  // win, loss, pending
+  pnl           Float?
+  thesis        String?  // Why you took this trade
+  lessonsLearned String?
+  confidence    Int?     // 1-10
+  tags          String[] @default([])
+  createdAt     DateTime @default(now())
+  closedAt      DateTime?
+
+  @@index([outcome])
+  @@index([marketTicker])
+}
+
+// Analysis Snapshot (daily portfolio metrics)
+model AnalysisSnapshot {
+  id              String   @id @default(cuid())
+  date            DateTime @unique
+  totalExposure   Float    // Total $ at risk
+  realizedPnl     Float
+  unrealizedPnl   Float
+  winRate         Float?
+  roi             Float?
+  brierScore      Float?   // Prediction accuracy
+  tradesCount     Int      @default(0)
+  winningTrades   Int      @default(0)
+  losingTrades    Int      @default(0)
+  byCategory      Json?    // { "Politics": { pnl: x, trades: y }, ... }
+  createdAt       DateTime @default(now())
+}
+
+// Event Calendar Entry
+model CalendarEvent {
+  id            String   @id @default(cuid())
+  title         String
+  description   String?
+  eventDate     DateTime
+  category      String
+  importance    Int      @default(3) // 1-5
+  relatedMarkets String[] @default([])
+  createdAt     DateTime @default(now())
+
+  @@index([eventDate])
+  @@index([category])
+}
