@@ -1,0 +1,174 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Kalshi Event (collection of related markets)
+model Event {
+  id              String    @id
+  ticker          String    @unique
+  title           String
+  category        String?
+  subCategory     String?
+  status          String    @default("open") // open, closed, settled
+  mutuallyExclusive Boolean @default(true)
+  markets         Market[]
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([category])
+  @@index([status])
+}
+
+// Kalshi Market (individual yes/no contract)
+model Market {
+  id              String    @id
+  ticker          String    @unique
+  eventId         String
+  event           Event     @relation(fields: [eventId], references: [id])
+  title           String
+  subtitle        String?
+  yesPrice        Float?    // Current yes price (0.01 - 0.99)
+  noPrice         Float?    // Current no price (0.01 - 0.99)
+  volume          Int       @default(0)
+  openInterest    Int       @default(0)
+  status          String    @default("active") // active, closed, settled
+  result          String?   // yes, no (after settlement)
+  expirationTime  DateTime?
+  closeTime       DateTime?
+  positions       Position[]
+  orders          Order[]
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([eventId])
+  @@index([status])
+  @@index([ticker])
+}
+
+// User positions in markets
+model Position {
+  id            String   @id @default(cuid())
+  marketId      String
+  market        Market   @relation(fields: [marketId], references: [id])
+  side          String   // yes, no
+  contracts     Int      // Number of contracts held
+  avgPrice      Float    // Average entry price
+  realizedPnl   Float    @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([marketId, side])
+  @@index([marketId])
+}
+
+// Order history
+model Order {
+  id            String   @id @default(cuid())
+  marketId      String
+  market        Market   @relation(fields: [marketId], references: [id])
+  side          String   // yes, no
+  action        String   // buy, sell
+  type          String   @default("market") // market, limit
+  contracts     Int
+  price         Float?   // Limit price (null for market orders)
+  filledPrice   Float?   // Actual fill price
+  filledContracts Int    @default(0)
+  status        String   @default("pending") // pending, filled, partial, cancelled, rejected
+  kalshiOrderId String?  @unique // External Kalshi order ID
+  expiresAt     DateTime?
+  createdAt     DateTime @default(now())
+  filledAt      DateTime?
+
+  @@index([marketId])
+  @@index([status])
+}
+
+// Trading policy configuration
+model PolicyConfig {
+  id                String   @id @default(cuid())
+  maxOrderSize      Int      @default(100)      // Max contracts per order
+  maxDailyVolume    Int      @default(1000)     // Max daily trading volume
+  maxExposure       Float    @default(1000)     // Max dollar exposure
+  minLiquidity      Int      @default(100)      // Min open interest required
+  maxSpread         Float    @default(0.10)     // Max bid-ask spread allowed
+  allowedCategories String[] @default([])       // Empty = all allowed
+  tradingEnabled    Boolean  @default(false)
+  updatedAt         DateTime @updatedAt
+}
+
+// Audit log for all actions
+model AuditLog {
+  id          String   @id @default(cuid())
+  action      String
+  entityType  String
+  entityId    String
+  details     Json?
+  createdAt   DateTime @default(now())
+}
+
+// API credentials storage (encrypted)
+model ApiCredentials {
+  id            String   @id @default(cuid())
+  platform      String   @default("kalshi")
+  email         String?
+  apiKeyId      String?
+  encryptedKey  String?  // Encrypted API private key
+  environment   String   @default("demo") // demo, production
+  isActive      Boolean  @default(false)
+  lastUsed      DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+// Cached trend data for market discovery
+model TrendCache {
+  id          String   @id @default(cuid())
+  topic       String
+  category    String
+  score       Float
+  sources     Json     // { reddit: [], news: [] }
+  keywords    String[]
+  sentiment   String?
+  createdAt   DateTime @default(now())
+  expiresAt   DateTime
+
+  @@index([category])
+  @@index([expiresAt])
+}
+
+// Reddit post cache
+model RedditPostCache {
+  id          String   @id
+  subreddit   String
+  title       String
+  selftext    String?
+  score       Int
+  numComments Int
+  url         String
+  author      String
+  postedAt    DateTime
+  fetchedAt   DateTime @default(now())
+
+  @@index([subreddit])
+  @@index([fetchedAt])
+}
+
+// News article cache  
+model NewsCache {
+  id          String   @id @default(cuid())
+  title       String
+  description String?
+  url         String   @unique
+  source      String
+  category    String?
+  publishedAt DateTime
+  fetchedAt   DateTime @default(now())
+
+  @@index([category])
+  @@index([fetchedAt])
+}
