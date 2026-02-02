@@ -56,17 +56,31 @@ export default function ArbitragePage() {
     try {
       setLoading(true);
       setError(null);
-      const response = await fetch('/api/arbitrage/scan?limit=50');
+      // Use the new endpoint with configurable params
+      const params = new URLSearchParams({
+        minProfit: '5', // $0.05 minimum after fees
+        minVolume: '1000', // Require liquidity
+        contracts: contracts.toString(),
+        maxBudget: '5000', // $50 max per trade
+      });
+      const response = await fetch(`/api/kalshi/arbitrage?${params}`);
       if (!response.ok) throw new Error('Failed to fetch');
       const result = await response.json();
-      setData(result);
+      // Map to expected format
+      setData({
+        opportunities: result.opportunities || [],
+        marketsScanned: result.summary?.marketsScanned || 0,
+        scanDuration: result.summary?.scanDuration || 0,
+        timestamp: result.timestamp || new Date().toISOString(),
+        demo: result.demo,
+      });
       setLastScan(new Date());
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error');
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [contracts]);
 
   useEffect(() => {
     fetchArbitrage();
@@ -79,9 +93,22 @@ export default function ArbitragePage() {
   }, [autoRefresh, fetchArbitrage]);
 
   const executeArbitrage = async (opportunity: ArbitrageOpportunity) => {
+    // Confirm before executing
+    const profit = calculateProfit(opportunity);
+    const confirmed = window.confirm(
+      `Execute arbitrage trade?\n\n` +
+      `Market: ${opportunity.markets[0]?.title || opportunity.markets[0]?.ticker}\n` +
+      `Contracts: ${contracts}\n` +
+      `Expected Net Profit: $${profit.net}\n` +
+      `ROI: ${profit.roi || 'N/A'}\n\n` +
+      `${!kalshiClient ? '⚠️ Demo mode - no real orders' : '💰 LIVE - Real money!'}`
+    );
+    
+    if (!confirmed) return;
+    
     setExecuting(opportunity.id);
     try {
-      const response = await fetch('/api/arbitrage/scan', {
+      const response = await fetch('/api/kalshi/execute', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -92,7 +119,13 @@ export default function ArbitragePage() {
       });
       const result = await response.json();
       if (result.ok) {
-        alert(`✅ Arbitrage executed! ${result.demo ? '(Demo mode)' : ''}`);
+        const summary = result.summary;
+        alert(
+          `✅ Arbitrage executed! ${result.demo ? '(Demo mode)' : ''}\n\n` +
+          `Completed: ${summary.completedSteps}/${summary.totalSteps} orders\n` +
+          `Total Cost: $${(summary.totalCostCents / 100).toFixed(2)}\n` +
+          `Expected Profit: $${(summary.expectedProfitCents / 100).toFixed(2)}`
+        );
       } else {
         alert(`❌ Execution failed: ${result.error}`);
       }
@@ -103,6 +136,9 @@ export default function ArbitragePage() {
       fetchArbitrage();
     }
   };
+  
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const kalshiClient = (typeof window !== 'undefined') ? null : null; // Client-side check
 
   const confidenceColor = (conf: string) => {
     switch (conf) {
@@ -117,13 +153,27 @@ export default function ArbitragePage() {
     return type === 'single_market' ? 'bg-blue-600' : 'bg-purple-600';
   };
 
-  const calculateProfit = (opp: ArbitrageOpportunity) => {
+  const calculateProfit = (opp: ArbitrageOpportunity & { calculation?: { netProfitCents: number; feesCents: number; grossProfitCents: number; roi: string } }) => {
+    // Use pre-calculated values if available from API
+    if (opp.calculation) {
+      return {
+        gross: (opp.calculation.grossProfitCents / 100).toFixed(2),
+        fees: (opp.calculation.feesCents / 100).toFixed(2),
+        net: (opp.calculation.netProfitCents / 100).toFixed(2),
+        roi: opp.calculation.roi,
+      };
+    }
+    // Fallback calculation (Kalshi ~1.5¢ per side)
     const gross = opp.profitPotential * contracts;
-    const fees = Math.min(0.01 * opp.executionSteps.length, 0.07) * contracts;
+    const feePerSide = 1.5; // cents
+    const fees = feePerSide * opp.executionSteps.length * contracts;
+    const net = gross - fees;
+    const totalCost = opp.executionSteps.reduce((sum, s) => sum + s.price * contracts, 0);
     return {
       gross: (gross / 100).toFixed(2),
       fees: (fees / 100).toFixed(2),
-      net: ((gross - fees) / 100).toFixed(2),
+      net: (net / 100).toFixed(2),
+      roi: totalCost > 0 ? ((net / totalCost) * 100).toFixed(2) + '%' : '0%',
     };
   };
 
@@ -296,18 +346,22 @@ export default function ArbitragePage() {
                   </div>
 
                   {/* Profit Breakdown */}
-                  <div className="grid grid-cols-3 gap-4 mb-4 p-3 bg-gray-700/50 rounded">
+                  <div className="grid grid-cols-4 gap-4 mb-4 p-3 bg-gray-700/50 rounded">
                     <div>
                       <div className="text-xs text-gray-500">Gross Profit</div>
                       <div className="text-lg font-semibold text-white">${profit.gross}</div>
                     </div>
                     <div>
-                      <div className="text-xs text-gray-500">Est. Fees</div>
+                      <div className="text-xs text-gray-500">Est. Fees (~2%)</div>
                       <div className="text-lg font-semibold text-red-400">-${profit.fees}</div>
                     </div>
                     <div>
                       <div className="text-xs text-gray-500">Net Profit</div>
                       <div className="text-lg font-semibold text-green-400">${profit.net}</div>
+                    </div>
+                    <div>
+                      <div className="text-xs text-gray-500">ROI</div>
+                      <div className="text-lg font-semibold text-blue-400">{profit.roi || 'N/A'}</div>
                     </div>
                   </div>
 

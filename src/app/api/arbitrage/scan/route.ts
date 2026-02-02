@@ -1,15 +1,17 @@
 import { NextResponse } from "next/server";
 import { kalshiClient } from "@/lib/kalshi";
-import { scanForArbitrage, ArbitrageScanResult } from "@/lib/arbitrage";
+import { scanForArbitrage, filterProfitableOpportunities, calculateProfit, ArbitrageScanResult } from "@/lib/arbitrage";
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
-  const minProfit = parseInt(searchParams.get("minProfit") || "1");
+  const minProfit = parseInt(searchParams.get("minProfit") || "5"); // $0.05 min after fees
+  const minVolume = parseInt(searchParams.get("minVolume") || "1000"); // Minimum liquidity
   const limit = parseInt(searchParams.get("limit") || "50");
   const type = searchParams.get("type"); // 'single_market' | 'cross_market' | undefined
+  const contracts = parseInt(searchParams.get("contracts") || "10");
 
   try {
     // Fetch all active markets
@@ -18,31 +20,61 @@ export async function GET(request: Request) {
       limit: 500,
     });
 
-    // Run arbitrage scan
-    const scanResult = scanForArbitrage(markets);
+    // Filter by minimum liquidity
+    const liquidMarkets = markets.filter(m => m.volume >= minVolume);
 
-    // Filter results
-    let opportunities = scanResult.opportunities
-      .filter(opp => opp.profitPotential >= minProfit);
+    // Run arbitrage scan
+    const scanResult = scanForArbitrage(liquidMarkets);
+
+    // Filter by minimum net profit after fees
+    let opportunities = filterProfitableOpportunities(
+      scanResult.opportunities,
+      minProfit,
+      contracts
+    );
+
+    // Add fee calculations to each opportunity
+    opportunities = opportunities.map(opp => {
+      const profitCalc = calculateProfit(opp, contracts);
+      return {
+        ...opp,
+        profitCalculation: {
+          contracts,
+          grossProfit: profitCalc.grossProfit,
+          estimatedFees: profitCalc.fees,
+          netProfit: profitCalc.netProfit,
+        }
+      };
+    });
 
     if (type) {
       opportunities = opportunities.filter(opp => opp.type === type);
     }
+
+    // Sort by net profit descending
+    opportunities.sort((a, b) => {
+      const aProfit = calculateProfit(a, contracts).netProfit;
+      const bProfit = calculateProfit(b, contracts).netProfit;
+      return bProfit - aProfit;
+    });
 
     // Apply limit
     opportunities = opportunities.slice(0, limit);
 
     const response: ArbitrageScanResult & { 
       demo: boolean; 
-      filtered: { minProfit: number; type: string | null; limit: number }
+      filtered: { minProfit: number; minVolume: number; type: string | null; limit: number; contracts: number }
     } = {
       ...scanResult,
       opportunities,
+      marketsScanned: liquidMarkets.length,
       demo: !kalshiClient.isConfigured(),
       filtered: {
         minProfit,
+        minVolume,
         type,
         limit,
+        contracts,
       },
     };
 

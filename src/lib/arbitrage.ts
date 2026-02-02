@@ -250,22 +250,53 @@ export function scanForArbitrage(markets: KalshiMarket[]): ArbitrageScanResult {
 
 /**
  * Calculate expected profit for a given opportunity
+ * 
+ * Kalshi fee structure (2025):
+ * - Contract fees: ~1-2% of contract value
+ * - Minimum fee: 0¢ 
+ * - Capped at 7¢ per contract side traded
+ * - Both buy/sell sides incur fees
  */
 export function calculateProfit(
   opportunity: ArbitrageOpportunity, 
   contracts: number
 ): { grossProfit: number; fees: number; netProfit: number } {
-  // Kalshi fee structure (simplified)
-  const feePerContract = 0.01; // 1 cent per contract
-  const feeCap = 0.07; // 7 cent max per contract
+  // Kalshi fee: ~1.5¢ per contract per side, capped at 7¢
+  const FEE_PER_SIDE = 1.5; // cents
+  const FEE_CAP = 7; // cents per side
   
   const grossProfit = opportunity.profitPotential * contracts;
-  const numTrades = opportunity.executionSteps.length;
-  const fees = Math.min(feePerContract * numTrades, feeCap) * contracts;
+  const numSides = opportunity.executionSteps.length; // Each step is one side
+  
+  // Fee per contract = sum of fees for each side, each capped individually
+  const feePerContract = numSides * Math.min(FEE_PER_SIDE, FEE_CAP);
+  const totalFees = feePerContract * contracts;
   
   return {
     grossProfit,
-    fees,
-    netProfit: grossProfit - fees,
+    fees: totalFees,
+    netProfit: grossProfit - totalFees,
   };
+}
+
+/**
+ * Check if an opportunity is profitable after fees
+ */
+export function isProfitableAfterFees(opportunity: ArbitrageOpportunity, contracts: number = 1): boolean {
+  const { netProfit } = calculateProfit(opportunity, contracts);
+  return netProfit > 0;
+}
+
+/**
+ * Filter opportunities to only profitable ones after fees
+ */
+export function filterProfitableOpportunities(
+  opportunities: ArbitrageOpportunity[],
+  minNetProfitCents: number = 5, // $0.05 minimum
+  contracts: number = 1
+): ArbitrageOpportunity[] {
+  return opportunities.filter(opp => {
+    const { netProfit } = calculateProfit(opp, contracts);
+    return netProfit >= minNetProfitCents;
+  });
 }
