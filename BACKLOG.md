@@ -13,12 +13,12 @@
 ### Pending
 
 #### P2 - Medium Priority
-- [ ] **KALSHI-006**: Replace console.log with proper logging system
-- [ ] **KALSHI-008**: Add tests for ArbitrageService database methods
+- [ ] **KALSHI-008**: Add tests for ArbitrageService database methods (17.56% coverage)
 - [ ] **KALSHI-009**: Add tests for StrategyRegistry (25.35% coverage)
 - [ ] **KALSHI-010**: Add API route handler tests
 - [ ] **KALSHI-013**: Implement unrealized P&L calculation (requires cost basis tracking)
 - [ ] **KALSHI-014**: Implement proper per-trade P&L tracking for win/loss stats
+- [ ] **KALSHI-015**: Update remaining API routes to use structured logging
 
 #### P3 - Low Priority
 - [ ] **KALSHI-011**: Add request/response logging with configurable levels
@@ -33,9 +33,11 @@
 - [x] **KALSHI-003**: Add retry logic with exponential backoff ✅
 - [x] **KALSHI-004**: Remove duplicate type definitions ✅
 - [x] **KALSHI-005**: Remove legacy KalshiClient class ✅
+- [x] **KALSHI-006**: Add structured logging utility ✅
 - [x] **KALSHI-007**: Fix type cast bypass in createOrder ✅
 - [x] **BUG-001**: Fix misleading P&L variable naming in risk dashboard ✅
 - [x] **BUG-002**: Fix invalid win/loss calculation logic in performance dashboard ✅
+- [x] **FEATURE-001**: Add /api/health endpoint for deployment monitoring ✅
 
 ---
 
@@ -50,13 +52,19 @@
 | 5 | 2026-02-02 | Bug Fix | Fixed P&L variable naming (realized vs unrealized) |
 | 6 | 2026-02-02 | Bug Fix | Fixed invalid win/loss calculation logic |
 | 7 | 2026-02-02 | Review | WebSocket service review - no changes needed |
+| 8 | 2026-02-02 | Logging | Added structured logging, updated WebSocket service |
+| 9 | 2026-02-02 | Infrastructure | Added health check endpoint |
 
 ---
 
 ## Statistics
 
 - **Total Tests**: 242 (all passing)
-- **Coverage**: 72.42% statements, 58.73% branches
-- **Key Coverage Improvements**:
-  - kalshi.ts: 3.41% → 82.35%
-  - Overall: 66.45% → 72.42%
+- **Coverage**: 72.66% statements, 58.85% branches
+- **Key Improvements**:
+  - kalshi.ts: 3.41% → 82.35% (+79%)
+  - Overall: 66.45% → 72.66% (+6.2%)
+  - Added timeout/retry for API reliability
+  - Added structured logging system
+  - Fixed 2 dashboard bugs
+  - Added health check endpoint
