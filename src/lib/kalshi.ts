@@ -93,7 +93,9 @@ class KalshiClient {
 
     // Kalshi signature format: timestamp (ms) + method + path
     // The path must include /trade-api/v2 prefix
-    const message = `${timestampMs}${method.toUpperCase()}${path}`;
+    // IMPORTANT: Strip query parameters before signing
+    const pathWithoutQuery = path.split('?')[0];
+    const message = `${timestampMs}${method.toUpperCase()}${pathWithoutQuery}`;
     
     // Format the private key properly
     let privateKey = this.config.privateKey;

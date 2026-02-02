@@ -5,6 +5,7 @@
  * and integration with Kalshi API.
  */
 
+import { PrismaClient } from '@prisma/client';
 import { kalshiClient } from '../kalshi';
 import { orderStateMachine, InvalidTransitionError } from './state-machine';
 import {
@@ -19,18 +20,11 @@ import {
   Fill,
 } from './types';
 
-// Lazy-initialize Prisma client only when DATABASE_URL is available
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-let prisma: any = null;
+// Lazily initialize Prisma client to avoid build-time errors
+let prisma: PrismaClient | null = null;
 
-function getPrisma() {
+function getPrisma(): PrismaClient {
   if (!prisma) {
-    if (!process.env.DATABASE_URL) {
-      throw new Error('DATABASE_URL is required for OMS operations');
-    }
-    // Dynamic import to avoid build-time initialization
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { PrismaClient } = require('@prisma/client');
     prisma = new PrismaClient();
   }
   return prisma;
@@ -553,19 +547,18 @@ export class OrderManagementService {
     }
 
     const [orders, total] = await Promise.all([
-      prisma.omsOrder.findMany({
+      getPrisma().omsOrder.findMany({
         where,
         include: { transitions: true, fills: true },
         orderBy: { createdAt: 'desc' },
         take: params?.limit ?? 50,
         skip: params?.offset ?? 0,
       }),
-      prisma.omsOrder.count({ where }),
+      getPrisma().omsOrder.count({ where }),
     ]);
 
     return {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      orders: orders.map((o: any) => this.mapPrismaOrder(o)),
+      orders: orders.map((o) => this.mapPrismaOrder(o)),
       total,
     };
   }
@@ -579,8 +572,7 @@ export class OrderManagementService {
       orderBy: { timestamp: 'asc' },
     });
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return fills.map((f: any) => ({
+    return fills.map((f) => ({
       id: f.id,
       orderId: f.orderId,
       contracts: f.contracts,
@@ -616,14 +608,14 @@ export class OrderManagementService {
 
     // Update order state and create transition record
     await getPrisma().$transaction([
-      prisma.omsOrder.update({
+      getPrisma().omsOrder.update({
         where: { id: orderId },
         data: {
           state: newState,
           rejectReason: newState === OrderState.REJECTED ? reason : undefined,
         },
       }),
-      prisma.omsStateTransition.create({
+      getPrisma().omsStateTransition.create({
         data: {
           orderId,
           fromState: currentState,
