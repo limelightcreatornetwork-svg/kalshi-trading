@@ -10,6 +10,7 @@
  */
 
 import crypto from 'crypto';
+import { apiLogger as log } from './logger';
 
 // ============================================================================
 // Configuration

@@ -18,6 +18,7 @@
  */
 
 import crypto from 'crypto';
+import { wsLogger as log } from '@/lib/logger';
 import {
   WebSocketConfig,
   WebSocketState,
@@ -122,17 +123,17 @@ export class KalshiWebSocketService {
    */
   async connect(): Promise<void> {
     if (this.state === WebSocketState.CONNECTED || this.state === WebSocketState.CONNECTING) {
-      console.log('[KalshiWS] Already connected or connecting');
+      log.info('Already connected or connecting');
       return;
     }
 
     this.state = WebSocketState.CONNECTING;
-    console.log(`[KalshiWS] Connecting to ${this.config.environment}...`);
+    log.info('Connecting', { environment: this.config.environment });
 
     try {
       await this.createConnection();
     } catch (error) {
-      console.error('[KalshiWS] Connection failed:', error);
+      log.error('Connection failed', { error: String(error) });
       this.handleDisconnect('Connection failed');
       throw error;
     }
@@ -142,7 +143,7 @@ export class KalshiWebSocketService {
    * Disconnect from the WebSocket server
    */
   disconnect(): void {
-    console.log('[KalshiWS] Disconnecting...');
+    log.info('Disconnecting');
     this.state = WebSocketState.CLOSING;
     this.clearTimers();
     
@@ -161,16 +162,16 @@ export class KalshiWebSocketService {
    */
   subscribe(subscription: ChannelSubscription): void {
     const channelKey = this.getChannelKey(subscription);
-    
+
     if (this.subscriptions.has(channelKey)) {
-      console.log(`[KalshiWS] Already subscribed to ${channelKey}`);
+      log.debug('Already subscribed', { channel: channelKey });
       return;
     }
 
     if (this.state !== WebSocketState.CONNECTED) {
       // Queue for when connected
       this.pendingSubscriptions.push(subscription);
-      console.log(`[KalshiWS] Queued subscription for ${channelKey}`);
+      log.debug('Queued subscription', { channel: channelKey });
       return;
     }
 
@@ -320,20 +321,20 @@ export class KalshiWebSocketService {
         this.state = WebSocketState.CONNECTED;
         this.connectedAt = new Date();
         this.reconnectAttempts = 0;
-        console.log('[KalshiWS] Connected');
-        
+        log.info('Connected');
+
         // Start ping interval
         this.startPingInterval();
-        
+
         // Send pending subscriptions
         this.sendPendingSubscriptions();
-        
+
         this.emit('connected', undefined);
         resolve();
       };
 
       this.ws.onclose = (event) => {
-        console.log(`[KalshiWS] Connection closed: ${event.code} ${event.reason}`);
+        log.info('Connection closed', { code: event.code, reason: event.reason });
         this.handleDisconnect(event.reason || 'Connection closed');
       };
 
@@ -343,7 +344,7 @@ export class KalshiWebSocketService {
 
       this.ws.onerror = (event) => {
         const error = new Error(event.message || 'WebSocket error');
-        console.error('[KalshiWS] Error:', error);
+        log.error('WebSocket error', { error: error.message });
         this.emit('error', { error, context: 'connection' });
         
         if (this.state === WebSocketState.CONNECTING) {
@@ -393,9 +394,9 @@ export class KalshiWebSocketService {
       this.config.maxReconnectDelayMs
     );
     
-    console.log(`[KalshiWS] Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts})`);
+    log.info('Reconnecting', { delayMs: delay, attempt: this.reconnectAttempts });
     this.emit('reconnecting', { attempt: this.reconnectAttempts, delayMs: delay });
-    
+
     this.reconnectTimer = setTimeout(async () => {
       try {
         await this.connect();
@@ -403,7 +404,7 @@ export class KalshiWebSocketService {
         this.resubscribeAll();
       } catch (error) {
         // Will be handled by handleDisconnect
-        console.error('[KalshiWS] Reconnect failed:', error);
+        log.error('Reconnect failed', { error: String(error) });
       }
     }, delay);
   }
@@ -432,8 +433,8 @@ export class KalshiWebSocketService {
     let message: WebSocketIncomingMessage;
     try {
       message = JSON.parse(data);
-    } catch (error) {
-      console.error('[KalshiWS] Failed to parse message:', data);
+    } catch {
+      log.error('Failed to parse message', { data: data.substring(0, 100) });
       return;
     }
 
@@ -453,8 +454,8 @@ export class KalshiWebSocketService {
         break;
         
       case WebSocketMessageType.ERROR:
-        console.error('[KalshiWS] Server error:', message);
-        this.emit('error', { 
+        log.error('Server error', { message: (message as { message: string }).message });
+        this.emit('error', {
           error: new Error((message as { message: string }).message),
           context: 'server',
         });
@@ -495,20 +496,20 @@ export class KalshiWebSocketService {
         break;
         
       default:
-        console.log('[KalshiWS] Unknown message type:', (message as { type: string }).type);
+        log.debug('Unknown message type', { type: (message as { type: string }).type });
     }
   }
 
   private sendMessage(message: WebSocketOutgoingMessage): void {
     if (!this.ws || this.state !== WebSocketState.CONNECTED) {
-      console.warn('[KalshiWS] Cannot send message: not connected');
+      log.warn('Cannot send message: not connected');
       return;
     }
 
     try {
       this.ws.send(JSON.stringify(message));
     } catch (error) {
-      console.error('[KalshiWS] Failed to send message:', error);
+      log.error('Failed to send message', { error: String(error) });
       this.emit('error', { error: error as Error, context: 'send' });
     }
   }
@@ -635,7 +636,7 @@ export class KalshiWebSocketService {
           listeners.delete(listener);
         }
       } catch (error) {
-        console.error(`[KalshiWS] Error in ${event} handler:`, error);
+        log.error('Error in event handler', { event, error: String(error) });
       }
     }
   }
