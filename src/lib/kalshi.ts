@@ -63,8 +63,8 @@ export interface KalshiOrder {
 }
 
 const BASE_URLS = {
-  demo: 'https://demo-api.kalshi.co/trade-api/v2',
-  production: 'https://trading-api.kalshi.com/trade-api/v2',
+  demo: 'https://demo-api.elections.kalshi.com/trade-api/v2',
+  production: 'https://api.elections.kalshi.com/trade-api/v2',
 };
 
 class KalshiClient {
@@ -86,13 +86,14 @@ class KalshiClient {
     return BASE_URLS[this.config?.environment || 'demo'];
   }
 
-  private signRequest(method: string, path: string, timestamp: number): string {
+  private signRequest(method: string, path: string, timestampMs: string): string {
     if (!this.config) {
       throw new Error('Kalshi client not configured');
     }
 
-    // Kalshi signature format: method + timestamp + path
-    const message = `${timestamp}${method}${path}`;
+    // Kalshi signature format: timestamp (ms) + method + path
+    // The path must include /trade-api/v2 prefix
+    const message = `${timestampMs}${method.toUpperCase()}${path}`;
     
     // Format the private key properly
     let privateKey = this.config.privateKey;
@@ -100,12 +101,18 @@ class KalshiClient {
       privateKey = `-----BEGIN RSA PRIVATE KEY-----\n${privateKey}\n-----END RSA PRIVATE KEY-----`;
     }
 
-    const sign = crypto.createSign('RSA-SHA256');
-    sign.update(message);
-    sign.end();
+    // Use RSA-PSS signature as required by Kalshi
+    const signature = crypto.sign(
+      'sha256',
+      Buffer.from(message),
+      {
+        key: privateKey,
+        padding: crypto.constants.RSA_PKCS1_PSS_PADDING,
+        saltLength: crypto.constants.RSA_PSS_SALTLEN_DIGEST,
+      }
+    );
     
-    const signature = sign.sign(privateKey, 'base64');
-    return signature;
+    return signature.toString('base64');
   }
 
   private async getAuthHeaders(method: string = 'GET', path: string = ''): Promise<Record<string, string>> {
@@ -113,14 +120,15 @@ class KalshiClient {
       throw new Error('Kalshi client not configured');
     }
 
-    const timestamp = Math.floor(Date.now() / 1000);
-    const signature = this.signRequest(method, path, timestamp);
+    // Timestamp must be in milliseconds
+    const timestampMs = Date.now().toString();
+    const signature = this.signRequest(method, path, timestampMs);
 
     return {
       'Content-Type': 'application/json',
       'KALSHI-ACCESS-KEY': this.config.apiKeyId,
       'KALSHI-ACCESS-SIGNATURE': signature,
-      'KALSHI-ACCESS-TIMESTAMP': timestamp.toString(),
+      'KALSHI-ACCESS-TIMESTAMP': timestampMs,
     };
   }
 
