@@ -13,7 +13,7 @@ export async function GET() {
     // Calculate exposure from positions
     const positions = positionsData?.market_positions || [];
     const totalExposure = positions.reduce((sum, p) => sum + Math.abs(p.market_exposure), 0);
-    const unrealizedPnl = positions.reduce((sum, p) => sum + p.realized_pnl, 0);
+    const realizedPnl = positions.reduce((sum, p) => sum + p.realized_pnl, 0);
     
     // Group positions by category (using first part of ticker as proxy)
     const exposureByCategory: Record<string, number> = {};
@@ -71,12 +71,13 @@ export async function GET() {
         utilization: marginUtilization,
       },
       
-      // P&L
+      // P&L (Note: realized P&L from positions; unrealized would require cost basis calculation)
       pnl: {
-        unrealized: unrealizedPnl / 100,
+        realized: realizedPnl / 100,
+        unrealized: 0, // TODO: Calculate from position value vs cost basis
         dailyLimit: 500,
-        dailyUsed: Math.abs(unrealizedPnl) / 100,
-        dailyUtilization: Math.min(100, (Math.abs(unrealizedPnl) / 50000) * 100),
+        dailyUsed: Math.abs(realizedPnl) / 100,
+        dailyUtilization: Math.min(100, (Math.abs(realizedPnl) / 50000) * 100),
       },
       
       // Risk limits
@@ -127,6 +128,7 @@ export async function GET() {
         utilization: 0,
       },
       pnl: {
+        realized: 0,
         unrealized: 0,
         dailyLimit: 500,
         dailyUsed: 0,

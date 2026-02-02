@@ -36,6 +36,7 @@ interface RiskData {
     utilization: number;
   };
   pnl: {
+    realized: number;
     unrealized: number;
     dailyLimit: number;
     dailyUsed: number;
@@ -153,9 +154,9 @@ export default function RiskDashboard() {
         <Card>
           <CardContent className="pt-4">
             <Stat
-              label="Unrealized P&L"
-              value={`$${data.pnl.unrealized >= 0 ? '+' : ''}${data.pnl.unrealized.toFixed(2)}`}
-              trend={data.pnl.unrealized >= 0 ? 'up' : 'down'}
+              label="Realized P&L"
+              value={`$${data.pnl.realized >= 0 ? '+' : ''}${data.pnl.realized.toFixed(2)}`}
+              trend={data.pnl.realized >= 0 ? 'up' : 'down'}
               trendValue={`${data.pnl.dailyUtilization.toFixed(0)}% of daily limit`}
             />
           </CardContent>
