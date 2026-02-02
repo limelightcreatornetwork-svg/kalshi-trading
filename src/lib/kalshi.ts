@@ -86,6 +86,25 @@ class KalshiClient {
     return BASE_URLS[this.config?.environment || 'demo'];
   }
 
+  private formatPrivateKey(key: string): string {
+    // If already formatted with headers, return as-is
+    if (key.includes('-----BEGIN')) {
+      return key;
+    }
+    
+    // Remove any whitespace
+    const cleanKey = key.replace(/\s/g, '');
+    
+    // Split into 64-character lines (PEM format requirement)
+    const lines: string[] = [];
+    for (let i = 0; i < cleanKey.length; i += 64) {
+      lines.push(cleanKey.slice(i, i + 64));
+    }
+    
+    // Wrap with RSA PRIVATE KEY headers
+    return `-----BEGIN RSA PRIVATE KEY-----\n${lines.join('\n')}\n-----END RSA PRIVATE KEY-----`;
+  }
+
   private signRequest(method: string, path: string, timestampMs: string): string {
     if (!this.config) {
       throw new Error('Kalshi client not configured');
@@ -97,11 +116,8 @@ class KalshiClient {
     const pathWithoutQuery = path.split('?')[0];
     const message = `${timestampMs}${method.toUpperCase()}${pathWithoutQuery}`;
     
-    // Format the private key properly
-    let privateKey = this.config.privateKey;
-    if (!privateKey.includes('-----BEGIN')) {
-      privateKey = `-----BEGIN RSA PRIVATE KEY-----\n${privateKey}\n-----END RSA PRIVATE KEY-----`;
-    }
+    // Format the private key properly for PEM
+    const privateKey = this.formatPrivateKey(this.config.privateKey);
 
     // Use RSA-PSS signature as required by Kalshi
     const signature = crypto.sign(
