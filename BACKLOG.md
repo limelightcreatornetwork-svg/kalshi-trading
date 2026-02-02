@@ -54,17 +54,22 @@
 | 7 | 2026-02-02 | Review | WebSocket service review - no changes needed |
 | 8 | 2026-02-02 | Logging | Added structured logging, updated WebSocket service |
 | 9 | 2026-02-02 | Infrastructure | Added health check endpoint |
+| 10 | 2026-02-02 | Features | Forecasting service with Kelly sizing (31 tests) |
+| 11 | 2026-02-02 | Testing | Market utils library (31 tests), 304 total |
+| 12 | 2026-02-02 | Documentation | Comprehensive README.md and CHANGELOG.md |
 
 ---
 
 ## Statistics
 
-- **Total Tests**: 242 (all passing)
-- **Coverage**: 72.66% statements, 58.85% branches
+- **Total Tests**: 304 (all passing)
+- **Coverage**: ~73% statements
 - **Key Improvements**:
   - kalshi.ts: 3.41% → 82.35% (+79%)
-  - Overall: 66.45% → 72.66% (+6.2%)
+  - Added ForecastingService with 31 tests
+  - Added market-utils with 31 tests
   - Added timeout/retry for API reliability
   - Added structured logging system
   - Fixed 2 dashboard bugs
   - Added health check endpoint
+  - Created comprehensive README.md and CHANGELOG.md
