@@ -1,475 +1,551 @@
-// Kalshi API Client with RSA-PSS Authentication
+/**
+ * Kalshi API Client
+ * 
+ * Kalshi is a US-regulated (CFTC) prediction market exchange.
+ * API Documentation: https://docs.kalshi.com/welcome
+ * 
+ * Authentication: RSA-PSS signatures with SHA256
+ * - Message format: timestamp_ms + HTTP_METHOD + path (without query params)
+ * - Headers: KALSHI-ACCESS-KEY, KALSHI-ACCESS-SIGNATURE, KALSHI-ACCESS-TIMESTAMP
+ */
+
 import crypto from 'crypto';
 
-const KALSHI_API_BASE_URL = process.env.KALSHI_API_BASE_URL || process.env.KALSHI_BASE_URL || 'https://api.elections.kalshi.com';
-const KALSHI_API_KEY_ID = process.env.KALSHI_API_KEY_ID;
-// Support both naming conventions
-const KALSHI_PRIVATE_KEY = process.env.KALSHI_PRIVATE_KEY || process.env.KALSHI_API_PRIVATE_KEY;
-
-export interface KalshiRequestOptions {
-  method: 'GET' | 'POST' | 'PUT' | 'DELETE';
-  path: string;
-  body?: unknown;
-  query?: Record<string, string | number | boolean | undefined>;
+export interface KalshiConfig {
+  apiKeyId: string;
+  privateKey: string;
+  environment: 'demo' | 'production';
 }
 
-/**
- * Create RSA-PSS signature for Kalshi API authentication
- */
-function createSignature(privateKeyPem: string, timestamp: string, method: string, path: string): string {
-  // Strip query parameters from path before signing
-  const pathWithoutQuery = path.split('?')[0];
-  
-  // Create the message to sign: timestamp + method + path
-  const message = `${timestamp}${method}${pathWithoutQuery}`;
-  
-  // Sign with RSA-PSS using SHA256
-  const sign = crypto.createSign('RSA-SHA256');
-  sign.update(message);
-  sign.end();
-  
-  // Use RSA-PSS padding
-  const signature = crypto.sign('sha256', Buffer.from(message), {
-    key: privateKeyPem,
-    padding: crypto.constants.RSA_PKCS1_PSS_PADDING,
-    saltLength: crypto.constants.RSA_PSS_SALTLEN_DIGEST,
-  });
-  
-  // Return base64 encoded signature
-  return signature.toString('base64');
+export interface KalshiEvent {
+  event_ticker: string;
+  title: string;
+  category: string;
+  sub_title?: string;
+  mutually_exclusive: boolean;
+  series_ticker?: string;
 }
 
-/**
- * Format PEM key from environment variable
- * The key might be stored without headers/footers or with escaped newlines
- * Kalshi keys are typically RSA PRIVATE KEY format
- */
-function formatPrivateKey(key: string): string {
-  // If it already looks like a PEM key, just fix newlines
-  if (key.includes('-----BEGIN')) {
-    return key.replace(/\\n/g, '\n');
-  }
-  
-  // Otherwise, wrap it in RSA PRIVATE KEY PEM format
-  const cleanKey = key.replace(/\s/g, '');
-  const chunks = cleanKey.match(/.{1,64}/g) || [];
-  return `-----BEGIN RSA PRIVATE KEY-----\n${chunks.join('\n')}\n-----END RSA PRIVATE KEY-----`;
-}
-
-// ============================================
-// Rate Limiting & Caching Configuration
-// ============================================
-
-const RATE_LIMIT_DELAY_MS = 300; // ms between requests (increased from 150ms)
-const MAX_RETRIES = 5; // increased retries
-const RETRY_DELAY_BASE_MS = 2000; // Base delay for exponential backoff (2s)
-const RETRY_DELAY_MAX_MS = 30000; // Maximum delay (30s)
-
-// Cache configuration
-const CACHE_TTL_MS = 5 * 60 * 1000; // 5-minute TTL for market data
-
-interface CacheEntry<T> {
-  data: T;
-  timestamp: number;
-}
-
-// Simple in-memory cache for market data
-const cache = new Map<string, CacheEntry<unknown>>();
-
-let lastRequestTime = 0;
-
-/**
- * Sleep for a specified number of milliseconds
- */
-function sleep(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
-
-/**
- * Generate cache key from request options
- */
-function getCacheKey(options: KalshiRequestOptions): string {
-  const queryStr = options.query ? JSON.stringify(options.query) : '';
-  return `${options.method}:${options.path}:${queryStr}`;
-}
-
-/**
- * Check if a request is cacheable (only GET requests for market data)
- */
-function isCacheable(options: KalshiRequestOptions): boolean {
-  // Cache GET requests for markets endpoint
-  return options.method === 'GET' && options.path.startsWith('/markets');
-}
-
-/**
- * Get cached response if valid
- */
-function getCached<T>(key: string): T | null {
-  const entry = cache.get(key);
-  if (!entry) return null;
-  
-  const age = Date.now() - entry.timestamp;
-  if (age > CACHE_TTL_MS) {
-    cache.delete(key);
-    return null;
-  }
-  
-  return entry.data as T;
-}
-
-/**
- * Store response in cache
- */
-function setCache<T>(key: string, data: T): void {
-  cache.set(key, { data, timestamp: Date.now() });
-  
-  // Clean old entries periodically (keep cache size bounded)
-  if (cache.size > 100) {
-    const now = Date.now();
-    for (const [k, v] of cache.entries()) {
-      if (now - v.timestamp > CACHE_TTL_MS) {
-        cache.delete(k);
-      }
-    }
-  }
-}
-
-/**
- * Clear the cache (useful for testing or forced refresh)
- */
-export function clearCache(): void {
-  cache.clear();
-}
-
-/**
- * Make an authenticated request to the Kalshi API with rate limiting, caching, and retries
- */
-export async function kalshiRequest<T>({ method, path, body, query }: KalshiRequestOptions): Promise<T> {
-  if (!KALSHI_API_KEY_ID || !KALSHI_PRIVATE_KEY) {
-    throw new Error('Kalshi API credentials not configured');
-  }
-
-  const options: KalshiRequestOptions = { method, path, body, query };
-  
-  // Check cache for GET requests
-  if (isCacheable(options)) {
-    const cacheKey = getCacheKey(options);
-    const cached = getCached<T>(cacheKey);
-    if (cached) {
-      console.log(`[Kalshi] Cache hit for ${path}`);
-      return cached;
-    }
-  }
-
-  // Rate limiting: ensure minimum delay between requests
-  const now = Date.now();
-  const timeSinceLastRequest = now - lastRequestTime;
-  if (timeSinceLastRequest < RATE_LIMIT_DELAY_MS) {
-    await sleep(RATE_LIMIT_DELAY_MS - timeSinceLastRequest);
-  }
-  lastRequestTime = Date.now();
-
-  // Build the full path with query parameters
-  const fullPath = `/trade-api/v2${path}`;
-  let url = `${KALSHI_API_BASE_URL}${fullPath}`;
-  
-  if (query) {
-    const params = new URLSearchParams();
-    for (const [key, value] of Object.entries(query)) {
-      if (value !== undefined && value !== null && value !== '') {
-        params.append(key, String(value));
-      }
-    }
-    const queryString = params.toString();
-    if (queryString) {
-      url += `?${queryString}`;
-    }
-  }
-
-  let lastError: Error | null = null;
-  
-  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
-    // Generate timestamp (in milliseconds)
-    const timestamp = Date.now().toString();
-    
-    // Format the private key
-    const privateKeyPem = formatPrivateKey(KALSHI_PRIVATE_KEY);
-    
-    // Create signature
-    const signature = createSignature(privateKeyPem, timestamp, method, fullPath);
-
-    // Build headers
-    const headers: Record<string, string> = {
-      'KALSHI-ACCESS-KEY': KALSHI_API_KEY_ID,
-      'KALSHI-ACCESS-SIGNATURE': signature,
-      'KALSHI-ACCESS-TIMESTAMP': timestamp,
-      'Content-Type': 'application/json',
-    };
-
-    // Make the request
-    const fetchOptions: RequestInit = {
-      method,
-      headers,
-    };
-
-    if (body && (method === 'POST' || method === 'PUT')) {
-      fetchOptions.body = JSON.stringify(body);
-    }
-
-    try {
-      const response = await fetch(url, fetchOptions);
-
-      // Handle rate limiting with exponential backoff
-      if (response.status === 429) {
-        const retryDelay = Math.min(RETRY_DELAY_BASE_MS * Math.pow(2, attempt), RETRY_DELAY_MAX_MS);
-        console.warn(`[Kalshi] Rate limited (429), retrying in ${retryDelay}ms (attempt ${attempt + 1}/${MAX_RETRIES})`);
-        await sleep(retryDelay);
-        lastRequestTime = Date.now();
-        continue;
-      }
-
-      // Handle errors
-      if (!response.ok) {
-        const errorBody = await response.text();
-        let errorMessage: string;
-        let errorJson: { code?: string; message?: string; error?: string } = {};
-        try {
-          errorJson = JSON.parse(errorBody);
-          errorMessage = errorJson.message || errorJson.error || errorBody;
-        } catch {
-          errorMessage = errorBody;
-        }
-        
-        // Retry on rate limit errors (check error code too)
-        if (errorJson.code === 'too_many_requests' && attempt < MAX_RETRIES - 1) {
-          const retryDelay = Math.min(RETRY_DELAY_BASE_MS * Math.pow(2, attempt), RETRY_DELAY_MAX_MS);
-          console.warn(`[Kalshi] Rate limited (code), retrying in ${retryDelay}ms (attempt ${attempt + 1}/${MAX_RETRIES})`);
-          await sleep(retryDelay);
-          lastRequestTime = Date.now();
-          continue;
-        }
-        
-        throw new KalshiApiError(
-          `Kalshi API error: ${response.status} ${response.statusText} - ${errorMessage}`,
-          response.status,
-          errorMessage
-        );
-      }
-
-      const data = await response.json();
-      
-      // Cache successful GET responses for market data
-      if (isCacheable(options)) {
-        const cacheKey = getCacheKey(options);
-        setCache(cacheKey, data);
-        console.log(`[Kalshi] Cached response for ${path}`);
-      }
-      
-      return data;
-    } catch (error) {
-      lastError = error instanceof Error ? error : new Error(String(error));
-      
-      // Don't retry on non-rate-limit errors
-      if (error instanceof KalshiApiError && error.statusCode !== 429) {
-        throw error;
-      }
-      
-      // Network errors - retry with backoff
-      if (attempt < MAX_RETRIES - 1) {
-        const retryDelay = Math.min(RETRY_DELAY_BASE_MS * Math.pow(2, attempt), RETRY_DELAY_MAX_MS);
-        console.warn(`[Kalshi] Request failed, retrying in ${retryDelay}ms (attempt ${attempt + 1}/${MAX_RETRIES}):`, lastError.message);
-        await sleep(retryDelay);
-        lastRequestTime = Date.now();
-      }
-    }
-  }
-  
-  throw lastError || new Error('Max retries exceeded');
-}
-
-/**
- * Custom error class for Kalshi API errors
- */
-export class KalshiApiError extends Error {
-  constructor(
-    message: string,
-    public statusCode: number,
-    public apiMessage: string
-  ) {
-    super(message);
-    this.name = 'KalshiApiError';
-  }
-}
-
-// ============================================
-// API Response Types
-// ============================================
-
-export interface BalanceResponse {
-  balance: number;
-  portfolio_value: number;
-  updated_ts: number;
-}
-
-export interface Market {
+export interface KalshiMarket {
   ticker: string;
   event_ticker: string;
-  market_type: string;
   title: string;
-  subtitle: string;
-  yes_sub_title: string;
-  no_sub_title: string;
-  status: string;
+  subtitle?: string;
   yes_bid: number;
   yes_ask: number;
   no_bid: number;
   no_ask: number;
   last_price: number;
   volume: number;
-  volume_24h: number;
   open_interest: number;
-  close_time: string;
+  status: 'active' | 'closed' | 'settled';
+  result?: 'yes' | 'no';
   expiration_time: string;
-  result?: string;
+  close_time?: string;
 }
 
-export interface MarketsResponse {
-  markets: Market[];
-  cursor: string;
-}
-
-export interface Order {
-  order_id: string;
-  user_id: string;
-  client_order_id?: string;
+export interface KalshiPosition {
   ticker: string;
-  side: 'yes' | 'no';
-  action: 'buy' | 'sell';
-  type: 'limit' | 'market';
-  status: string;
-  yes_price: number;
-  no_price: number;
-  fill_count: number;
-  remaining_count: number;
-  initial_count: number;
-  taker_fees: number;
-  maker_fees: number;
-  created_time: string;
-  last_update_time: string;
-}
-
-export interface OrdersResponse {
-  orders: Order[];
-  cursor: string;
-}
-
-export interface CreateOrderRequest {
-  ticker: string;
-  side: 'yes' | 'no';
-  action: 'buy' | 'sell';
-  count: number;
-  type?: 'limit' | 'market';
-  yes_price?: number;
-  no_price?: number;
-  client_order_id?: string;
-  time_in_force?: 'fill_or_kill' | 'good_till_canceled' | 'immediate_or_cancel';
-  expiration_ts?: number;
-  post_only?: boolean;
-}
-
-export interface CreateOrderResponse {
-  order: Order;
-}
-
-export interface MarketPosition {
-  ticker: string;
-  total_traded: number;
-  position: number;
   market_exposure: number;
-  realized_pnl: number;
+  position: number;
   resting_orders_count: number;
-  fees_paid: number;
-  last_updated_ts: string;
-}
-
-export interface EventPosition {
-  event_ticker: string;
-  total_cost: number;
-  event_exposure: number;
+  total_traded: number;
   realized_pnl: number;
-  fees_paid: number;
 }
 
-export interface PositionsResponse {
-  market_positions: MarketPosition[];
-  event_positions: EventPosition[];
-  cursor: string;
+export interface KalshiOrder {
+  order_id: string;
+  ticker: string;
+  action: 'buy' | 'sell';
+  side: 'yes' | 'no';
+  type: 'market' | 'limit';
+  count: number;
+  limit_price?: number;
+  status: 'pending' | 'active' | 'closed' | 'canceled';
+  created_time: string;
+  expiration_time?: string;
 }
 
-// ============================================
-// API Functions
-// ============================================
+const BASE_URLS = {
+  demo: 'https://demo-api.kalshi.co/trade-api/v2',
+  production: 'https://api.elections.kalshi.com/trade-api/v2',
+};
 
-export async function getBalance(): Promise<BalanceResponse> {
-  return kalshiRequest<BalanceResponse>({
-    method: 'GET',
-    path: '/portfolio/balance',
-  });
+class KalshiClient {
+  private config: KalshiConfig | null = null;
+  private token: string | null = null;
+  private tokenExpiry: Date | null = null;
+
+  configure(config: KalshiConfig) {
+    this.config = config;
+    this.token = null;
+    this.tokenExpiry = null;
+  }
+
+  isConfigured(): boolean {
+    return !!this.config?.apiKeyId && !!this.config?.privateKey;
+  }
+
+  private getBaseUrl(): string {
+    const env = (this.config?.environment || 'demo').trim().toLowerCase();
+    const validEnv = (env === 'production' || env === 'demo') ? env : 'demo';
+    return BASE_URLS[validEnv as keyof typeof BASE_URLS];
+  }
+
+  private formatPrivateKey(key: string): string {
+    // If already formatted with headers, return as-is
+    if (key.includes('-----BEGIN')) {
+      return key;
+    }
+    
+    // Remove common prefixes like "Kalshi key: " (case-insensitive)
+    let cleanKey = key.replace(/^kalshi\s*key:\s*/i, '');
+    
+    // Remove any whitespace/newlines
+    cleanKey = cleanKey.replace(/\s/g, '');
+    
+    // Split into 64-character lines (PEM format requirement)
+    const lines: string[] = [];
+    for (let i = 0; i < cleanKey.length; i += 64) {
+      lines.push(cleanKey.slice(i, i + 64));
+    }
+    
+    // Wrap with RSA PRIVATE KEY headers
+    return `-----BEGIN RSA PRIVATE KEY-----\n${lines.join('\n')}\n-----END RSA PRIVATE KEY-----`;
+  }
+
+  private signRequest(method: string, path: string, timestampMs: string): string {
+    if (!this.config) {
+      throw new Error('Kalshi client not configured');
+    }
+
+    // Kalshi signature format: timestamp (ms) + method + path
+    // The path must include /trade-api/v2 prefix
+    // IMPORTANT: Strip query parameters before signing
+    const pathWithoutQuery = path.split('?')[0];
+    const message = `${timestampMs}${method.toUpperCase()}${pathWithoutQuery}`;
+    
+    // Format the private key properly for PEM
+    const pemKey = this.formatPrivateKey(this.config.privateKey);
+    
+    // Use createSign with RSA-SHA256 and PSS padding as per Kalshi docs
+    const sign = crypto.createSign('RSA-SHA256');
+    sign.update(message);
+    sign.end();
+    
+    const signature = sign.sign({
+      key: pemKey,
+      padding: crypto.constants.RSA_PKCS1_PSS_PADDING,
+      saltLength: crypto.constants.RSA_PSS_SALTLEN_DIGEST,
+    });
+    
+    return signature.toString('base64');
+  }
+
+  private async getAuthHeaders(method: string = 'GET', path: string = ''): Promise<Record<string, string>> {
+    if (!this.config) {
+      throw new Error('Kalshi client not configured');
+    }
+
+    // Timestamp must be in milliseconds
+    const timestampMs = Date.now().toString();
+    const signature = this.signRequest(method, path, timestampMs);
+
+    return {
+      'Content-Type': 'application/json',
+      'KALSHI-ACCESS-KEY': this.config.apiKeyId,
+      'KALSHI-ACCESS-SIGNATURE': signature,
+      'KALSHI-ACCESS-TIMESTAMP': timestampMs,
+    };
+  }
+
+  async getEvents(params?: { 
+    category?: string; 
+    status?: string; 
+    limit?: number 
+  }): Promise<KalshiEvent[]> {
+    if (!this.isConfigured()) {
+      return this.getMockEvents();
+    }
+
+    try {
+      const queryParams = new URLSearchParams();
+      if (params?.category) queryParams.set('category', params.category);
+      if (params?.status) queryParams.set('status', params.status);
+      if (params?.limit) queryParams.set('limit', params.limit.toString());
+
+      const path = `/trade-api/v2/events?${queryParams}`;
+      const response = await fetch(
+        `${this.getBaseUrl()}/events?${queryParams}`,
+        { headers: await this.getAuthHeaders('GET', path) }
+      );
+
+      if (!response.ok) {
+        throw new Error(`Kalshi API error: ${response.status}`);
+      }
+
+      const data = await response.json();
+      return data.events || [];
+    } catch (error) {
+      console.error('Kalshi getEvents error:', error);
+      return this.getMockEvents();
+    }
+  }
+
+  async getMarkets(params?: {
+    event_ticker?: string;
+    status?: string;
+    ticker?: string;
+    limit?: number;
+  }): Promise<KalshiMarket[]> {
+    if (!this.isConfigured()) {
+      return this.getMockMarkets();
+    }
+
+    try {
+      const queryParams = new URLSearchParams();
+      if (params?.event_ticker) queryParams.set('event_ticker', params.event_ticker);
+      // Note: Kalshi API doesn't support 'active' as a status filter
+      // Valid statuses are: 'open', 'closed', 'settled' (filter locally if needed)
+      if (params?.status && params.status !== 'active') {
+        queryParams.set('status', params.status);
+      }
+      if (params?.ticker) queryParams.set('ticker', params.ticker);
+      if (params?.limit) queryParams.set('limit', params.limit.toString());
+
+      const queryString = queryParams.toString();
+      const path = `/trade-api/v2/markets${queryString ? `?${queryString}` : ''}`;
+      const url = `${this.getBaseUrl()}/markets${queryString ? `?${queryString}` : ''}`;
+      const response = await fetch(url, { headers: await this.getAuthHeaders('GET', path) });
+
+      if (!response.ok) {
+        throw new Error(`Kalshi API error: ${response.status}`);
+      }
+
+      const data = await response.json();
+      return data.markets || [];
+    } catch (error) {
+      console.error('Kalshi getMarkets error:', error);
+      return this.getMockMarkets();
+    }
+  }
+
+  async getPositions(): Promise<KalshiPosition[]> {
+    if (!this.isConfigured()) {
+      return [];
+    }
+
+    try {
+      const path = '/trade-api/v2/portfolio/positions';
+      const response = await fetch(
+        `${this.getBaseUrl()}/portfolio/positions`,
+        { headers: await this.getAuthHeaders('GET', path) }
+      );
+
+      if (!response.ok) {
+        throw new Error(`Kalshi API error: ${response.status}`);
+      }
+
+      const data = await response.json();
+      return data.market_positions || [];
+    } catch (error) {
+      console.error('Kalshi getPositions error:', error);
+      return [];
+    }
+  }
+
+  async createOrder(order: {
+    ticker: string;
+    action: 'buy' | 'sell';
+    side: 'yes' | 'no';
+    type: 'market' | 'limit';
+    count: number;
+    limit_price?: number;  // Price in cents (will be converted to yes_price/no_price)
+    expiration_ts?: number;
+  }): Promise<{ success: boolean; order?: KalshiOrder; error?: string; mock?: boolean }> {
+    if (!this.isConfigured()) {
+      // Return mock order for demo
+      return {
+        success: true,
+        order: {
+          order_id: `mock_${Date.now()}`,
+          ticker: order.ticker,
+          action: order.action,
+          side: order.side,
+          type: order.type,
+          count: order.count,
+          limit_price: order.limit_price,
+          status: 'active',
+          created_time: new Date().toISOString(),
+        },
+        mock: true,
+      };
+    }
+
+    try {
+      const path = '/trade-api/v2/portfolio/orders';
+      
+      // Convert limit_price to Kalshi's yes_price format
+      // Kalshi API expects: ticker, action, side, type, count, yes_price (in cents)
+      const requestBody: Record<string, unknown> = {
+        ticker: order.ticker,
+        action: order.action,
+        side: order.side,
+        type: order.type,
+        count: order.count,
+      };
+      
+      if (order.type === 'limit' && order.limit_price !== undefined) {
+        // Kalshi uses yes_price (price for YES side in cents)
+        requestBody.yes_price = order.limit_price;
+      }
+      
+      if (order.expiration_ts) {
+        requestBody.expiration_ts = order.expiration_ts;
+      }
+      
+      const response = await fetch(
+        `${this.getBaseUrl()}/portfolio/orders`,
+        {
+          method: 'POST',
+          headers: await this.getAuthHeaders('POST', path),
+          body: JSON.stringify(requestBody),
+        }
+      );
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.message || `Kalshi API error: ${response.status}`);
+      }
+
+      const data = await response.json();
+      return {
+        success: true,
+        order: data.order,
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to create order';
+      console.error('Kalshi createOrder error:', error);
+      return { success: false, error: message };
+    }
+  }
+
+  async cancelOrder(orderId: string): Promise<{ success: boolean; error?: string; mock?: boolean }> {
+    if (!this.isConfigured()) {
+      return { success: true, mock: true };
+    }
+
+    try {
+      const path = `/trade-api/v2/portfolio/orders/${orderId}`;
+      const response = await fetch(
+        `${this.getBaseUrl()}/portfolio/orders/${orderId}`,
+        {
+          method: 'DELETE',
+          headers: await this.getAuthHeaders('DELETE', path),
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(`Kalshi API error: ${response.status}`);
+      }
+
+      return { success: true };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to cancel order';
+      console.error('Kalshi cancelOrder error:', error);
+      return { success: false, error: message };
+    }
+  }
+
+  async getBalance(): Promise<{ available: number; total: number; mock?: boolean }> {
+    if (!this.isConfigured()) {
+      return { available: 0, total: 0, mock: true };
+    }
+
+    try {
+      const path = '/trade-api/v2/portfolio/balance';
+      const response = await fetch(
+        `${this.getBaseUrl()}/portfolio/balance`,
+        { headers: await this.getAuthHeaders('GET', path) }
+      );
+
+      if (!response.ok) {
+        throw new Error(`Kalshi API error: ${response.status}`);
+      }
+
+      const data = await response.json();
+      return {
+        available: data.balance / 100, // Kalshi returns cents
+        total: (data.balance + data.portfolio_value) / 100,
+      };
+    } catch (error) {
+      console.error('Kalshi getBalance error:', error);
+      return { available: 0, total: 0, mock: true };
+    }
+  }
+
+  async getBalanceWithError(): Promise<{ available: number; total: number; error?: string }> {
+    if (!this.isConfigured()) {
+      return { available: 0, total: 0, error: 'Client not configured' };
+    }
+
+    try {
+      const path = '/trade-api/v2/portfolio/balance';
+      const headers = await this.getAuthHeaders('GET', path);
+      const url = `${this.getBaseUrl()}/portfolio/balance`;
+      
+      console.log('Fetching balance from:', url);
+      console.log('Headers:', JSON.stringify(headers, null, 2));
+      
+      const response = await fetch(url, { headers });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        let errorMessage = `Kalshi API error ${response.status}`;
+        try {
+          const errorJson = JSON.parse(errorText);
+          errorMessage = errorJson.error?.message || errorJson.message || errorMessage;
+        } catch {
+          errorMessage = errorText || errorMessage;
+        }
+        return { available: 0, total: 0, error: errorMessage };
+      }
+
+      const data = await response.json();
+      return {
+        available: data.balance / 100,
+        total: (data.balance + data.portfolio_value) / 100,
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      console.error('Kalshi getBalanceWithError error:', error);
+      return { available: 0, total: 0, error: message };
+    }
+  }
+
+  // Mock data for demo mode
+  private getMockEvents(): KalshiEvent[] {
+    return [
+      {
+        event_ticker: 'FED-RATE-26MAR',
+        title: 'Fed Interest Rate Decision - March 2026',
+        category: 'Economics',
+        mutually_exclusive: true,
+      },
+      {
+        event_ticker: 'WEATHER-NYC-26FEB',
+        title: 'NYC Weather - February 2026',
+        category: 'Weather',
+        mutually_exclusive: false,
+      },
+    ];
+  }
+
+  private getMockMarkets(): KalshiMarket[] {
+    return [
+      // Normal market - no arbitrage
+      {
+        ticker: 'FED-26MAR-T5.00',
+        event_ticker: 'FED-RATE-26MAR',
+        title: 'Fed rate above 5.00% on March 26',
+        yes_bid: 33,
+        yes_ask: 37,
+        no_bid: 63,
+        no_ask: 67,
+        last_price: 35,
+        volume: 12500,
+        open_interest: 8500,
+        status: 'active',
+        expiration_time: '2026-03-26T18:00:00Z',
+      },
+      // ARBITRAGE OPPORTUNITY: YES + NO asks = 95 (buy both for 5¢ profit!)
+      {
+        ticker: 'RAIN-NYC-26FEB01',
+        event_ticker: 'WEATHER-NYC-26FEB',
+        title: 'Rain in NYC on Feb 1, 2026',
+        yes_bid: 65,
+        yes_ask: 68,
+        no_bid: 25,
+        no_ask: 27, // 68 + 27 = 95 < 100 → arbitrage!
+        last_price: 67,
+        volume: 8200,
+        open_interest: 4100,
+        status: 'active',
+        expiration_time: '2026-02-05T23:59:59Z',
+      },
+      // ARBITRAGE OPPORTUNITY: YES + NO asks = 97 (buy both for 3¢ profit!)
+      {
+        ticker: 'BTC-100K-26Q1',
+        event_ticker: 'CRYPTO-BTC-26Q1',
+        title: 'Bitcoin above $100K end of Q1 2026',
+        yes_bid: 44,
+        yes_ask: 47,
+        no_bid: 48,
+        no_ask: 50, // 47 + 50 = 97 < 100 → arbitrage!
+        last_price: 46,
+        volume: 45000,
+        open_interest: 22000,
+        status: 'active',
+        expiration_time: '2026-03-31T23:59:59Z',
+      },
+      // Cross-market arbitrage setup - Fed rate brackets (mutually exclusive)
+      {
+        ticker: 'FED-26MAR-T4.50',
+        event_ticker: 'FED-RATE-26MAR',
+        title: 'Fed rate between 4.25% - 4.50%',
+        yes_bid: 18,
+        yes_ask: 22,
+        no_bid: 75,
+        no_ask: 82,
+        last_price: 20,
+        volume: 5000,
+        open_interest: 3000,
+        status: 'active',
+        expiration_time: '2026-03-26T18:00:00Z',
+      },
+      {
+        ticker: 'FED-26MAR-T4.75',
+        event_ticker: 'FED-RATE-26MAR',
+        title: 'Fed rate between 4.50% - 4.75%',
+        yes_bid: 35,
+        yes_ask: 40,
+        no_bid: 57,
+        no_ask: 65,
+        last_price: 38,
+        volume: 8000,
+        open_interest: 4500,
+        status: 'active',
+        expiration_time: '2026-03-26T18:00:00Z',
+      },
+      // ARBITRAGE: sell both YES bids for 105¢ (5¢ profit if you hold positions)
+      {
+        ticker: 'ETH-5K-26FEB',
+        event_ticker: 'CRYPTO-ETH-26FEB',
+        title: 'Ethereum above $5K by Feb 28, 2026',
+        yes_bid: 55, // 55 + 50 = 105 > 100 → sell arb!
+        yes_ask: 60,
+        no_bid: 50,
+        no_ask: 55,
+        last_price: 57,
+        volume: 32000,
+        open_interest: 18000,
+        status: 'active',
+        expiration_time: '2026-02-28T23:59:59Z',
+      },
+    ];
+  }
 }
 
-export async function getMarkets(params?: {
-  limit?: number;
-  cursor?: string;
-  event_ticker?: string;
-  series_ticker?: string;
-  status?: string;
-  tickers?: string;
-}): Promise<MarketsResponse> {
-  return kalshiRequest<MarketsResponse>({
-    method: 'GET',
-    path: '/markets',
-    query: params as Record<string, string | number | boolean | undefined>,
-  });
-}
+// Singleton instance
+export const kalshiClient = new KalshiClient();
 
-export async function getOrders(params?: {
-  limit?: number;
-  cursor?: string;
-  ticker?: string;
-  status?: string;
-}): Promise<OrdersResponse> {
-  return kalshiRequest<OrdersResponse>({
-    method: 'GET',
-    path: '/portfolio/orders',
-    query: params as Record<string, string | number | boolean | undefined>,
-  });
-}
-
-export async function createOrder(order: CreateOrderRequest): Promise<CreateOrderResponse> {
-  return kalshiRequest<CreateOrderResponse>({
-    method: 'POST',
-    path: '/portfolio/orders',
-    body: order,
-  });
-}
-
-export async function cancelOrder(orderId: string): Promise<void> {
-  return kalshiRequest({
-    method: 'DELETE',
-    path: `/portfolio/orders/${orderId}`,
-  });
-}
-
-export async function getPositions(params?: {
-  limit?: number;
-  cursor?: string;
-  ticker?: string;
-  event_ticker?: string;
-  settlement_status?: string;
-}): Promise<PositionsResponse> {
-  return kalshiRequest<PositionsResponse>({
-    method: 'GET',
-    path: '/portfolio/positions',
-    query: params as Record<string, string | number | boolean | undefined>,
+// Initialize from environment
+if (process.env.KALSHI_API_KEY_ID && process.env.KALSHI_API_PRIVATE_KEY) {
+  const envValue = (process.env.KALSHI_ENV || 'demo').trim().toLowerCase();
+  const validEnv = (envValue === 'production' || envValue === 'demo') ? envValue : 'demo';
+  kalshiClient.configure({
+    apiKeyId: process.env.KALSHI_API_KEY_ID.trim(),
+    privateKey: process.env.KALSHI_API_PRIVATE_KEY.trim(),
+    environment: validEnv as 'demo' | 'production',
   });
 }
