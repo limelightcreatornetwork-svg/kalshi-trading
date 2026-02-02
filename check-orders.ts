@@ -6,8 +6,8 @@ async function main() {
   // Check balance
   const balance = await kalshi.getBalance();
   console.log('💰 Balance:');
-  console.log('   Available:', '$' + (balance.available_balance / 100).toFixed(2));
-  console.log('   Total:', '$' + (balance.balance / 100).toFixed(2));
+  console.log('   Portfolio Value:', '$' + (balance.portfolio_value / 100).toFixed(2));
+  console.log('   Balance:', '$' + (balance.balance / 100).toFixed(2));
   
   // Check open orders
   console.log('\n📋 Open Orders:');

@@ -28,6 +28,12 @@ function Navigation() {
           </Link>
           <div className="flex items-center gap-6">
             <Link
+              href="/dashboard"
+              className="text-zinc-400 hover:text-white transition-colors text-sm font-medium"
+            >
+              🎛️ Dashboard
+            </Link>
+            <Link
               href="/arbitrage"
               className="text-zinc-400 hover:text-white transition-colors text-sm font-medium"
             >
