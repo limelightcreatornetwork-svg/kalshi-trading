@@ -38,21 +38,25 @@ export default function Home() {
             </ul>
           </Link>
 
-          {/* Markets */}
-          <div className="p-8 bg-zinc-900/50 rounded-xl border border-zinc-800 hover:border-zinc-700 transition-all">
+          {/* Forecasting Models */}
+          <Link
+            href="/forecasting"
+            className="group p-8 bg-gradient-to-br from-blue-900/30 to-blue-800/20 rounded-xl border border-blue-500/30 hover:border-blue-400/50 transition-all hover:scale-[1.02]"
+          >
             <div className="text-4xl mb-4">📊</div>
-            <h2 className="text-2xl font-bold text-white mb-2">
-              Market Data
+            <h2 className="text-2xl font-bold text-white mb-2 group-hover:text-blue-400 transition-colors">
+              Forecasting Models
             </h2>
             <p className="text-zinc-400 mb-4">
-              Browse and analyze all active Kalshi markets with real-time pricing data.
+              Compare model predictions vs market prices to find edge opportunities.
             </p>
             <ul className="text-sm text-zinc-500 space-y-1">
-              <li>✓ Live bid/ask prices</li>
-              <li>✓ Volume & open interest</li>
-              <li>✓ Market filtering</li>
+              <li>✓ Implied probability extraction</li>
+              <li>✓ Multiple forecast models</li>
+              <li>✓ Kelly criterion sizing</li>
+              <li>✓ Edge opportunity detection</li>
             </ul>
-          </div>
+          </Link>
 
           {/* Order Management */}
           <div className="p-8 bg-zinc-900/50 rounded-xl border border-zinc-800 hover:border-zinc-700 transition-all">

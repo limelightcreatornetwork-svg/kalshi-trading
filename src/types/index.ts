@@ -6,3 +6,4 @@ export * from './arbitrage';
 export * from './thesis';
 export * from './strategy';
 export * from './websocket';
+export * from './forecasting';
