@@ -29,7 +29,7 @@ The project now has a comprehensive trading agent infrastructure with:
 - ✅ Extended Prisma schema (Thesis, Signal, DailyPnL, Strategy models)
 
 **Remaining gaps:**
-- 🔴 WebSocket integration for real-time updates
+- ✅ WebSocket integration for real-time updates (IMPLEMENTED!)
 - 🔴 Forecasting models (ML/LLM)
 - 🔴 UI screens (dashboard, controls, trade blotter)
 - 🔴 News trading strategy
@@ -46,14 +46,14 @@ The project now has a comprehensive trading agent infrastructure with:
 | Public data (markets, orderbooks) | ✅ Implemented | `getMarkets()` in kalshi.ts |
 | Private data (orders, positions, balances) | ✅ Implemented | `getOrders()`, `getPositions()`, `getBalance()` |
 | REST endpoints | ✅ Implemented | Full CRUD for orders |
-| WebSocket streams | ❌ Missing | No real-time updates |
+| WebSocket streams | ✅ Implemented | KalshiWebSocketService.ts |
 | API throttling + backoff | ⚠️ Partial | No rate-limit handling, just logs errors |
 | Fees in EV calculations | ⚠️ Partial | Schema has `fee` field, not used in arbitrage EV |
 | Compliance kill switch by category | ❌ Missing | Kill switch exists but no category filtering |
 | Jurisdiction toggles | ❌ Missing | No CFTC/state dispute handling |
 
 ### Action Items:
-1. Add WebSocket client for portfolio updates
+1. ~~Add WebSocket client for portfolio updates~~ ✅ DONE
 2. Implement exponential backoff on rate-limit errors
 3. Incorporate fees into arbitrage profit calculations
 4. Add `restrictedCategories` config for compliance
@@ -94,7 +94,7 @@ The project now has a comprehensive trading agent infrastructure with:
 | Place/cancel/replace orders | ✅ Implemented | `createOrder()`, `cancelOrder()` |
 | Marketable and resting orders | ✅ Implemented | Limit and market orders supported |
 | Queue position tracking | ❌ Missing | No order book position tracking |
-| WebSocket portfolio updates | ❌ Missing | Critical for real-time |
+| WebSocket portfolio updates | ✅ Implemented | KalshiWebSocketService.ts |
 | Reconciliation loop | ❌ Missing | No periodic reconciliation |
 | Idempotent repair jobs | ⚠️ Partial | Idempotency service exists, no repair job |
 
@@ -241,7 +241,7 @@ The project now has a comprehensive trading agent infrastructure with:
 1. **Thesis/Evidence Tracking** - New Prisma model + service
 2. **Daily Loss Tracking** - Track P&L, trigger kill switch
 3. **Strategy Plugin Interface** - Abstract base + registry
-4. **WebSocket Client** - Real-time portfolio updates
+4. ~~**WebSocket Client** - Real-time portfolio updates~~ ✅ DONE
 
 ### Phase 2: Risk Controls (Week 2)
 5. **Pre-trade checks** - Spread, liquidity, slippage
@@ -272,7 +272,7 @@ The project now has a comprehensive trading agent infrastructure with:
 - `src/services/ReconciliationService.ts` - Position sync
 - `src/services/DailyPnLService.ts` - P&L tracking
 - `src/services/StrategyRegistry.ts` - Plugin registry
-- `src/lib/kalshi-ws.ts` - WebSocket client
+- ~~`src/lib/kalshi-ws.ts`~~ `src/services/KalshiWebSocketService.ts` - WebSocket client ✅
 - `src/app/dashboard/page.tsx` - Trading dashboard
 - `src/app/blotter/page.tsx` - Trade blotter
 - `src/app/controls/page.tsx` - Risk controls

@@ -9,6 +9,7 @@ export * from './ThesisService';
 export * from './StrategyRegistry';
 export * from './DailyPnLService';
 export * from './PreTradeCheckService';
+export * from './KalshiWebSocketService';
 
 // Strategy implementations
 export * from './strategies/BaseStrategy';
