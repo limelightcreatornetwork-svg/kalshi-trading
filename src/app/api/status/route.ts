@@ -12,21 +12,33 @@ export async function GET() {
       env: {
         hasApiKeyId: !!process.env.KALSHI_API_KEY_ID,
         hasPrivateKey: !!process.env.KALSHI_API_PRIVATE_KEY,
-        environment: process.env.KALSHI_ENV || 'demo',
+        environment: (process.env.KALSHI_ENV || 'demo').trim(),
       }
     });
   }
 
   try {
-    // Test the API connection by fetching balance
-    const balance = await kalshiClient.getBalance();
+    // Test the API connection by fetching balance with detailed error
+    const balance = await kalshiClient.getBalanceWithError();
+    
+    if (balance.error) {
+      return NextResponse.json({
+        ok: false,
+        configured: true,
+        error: balance.error,
+        environment: (process.env.KALSHI_ENV || 'demo').trim(),
+        timestamp: new Date().toISOString(),
+      });
+    }
     
     return NextResponse.json({
       ok: true,
       configured: true,
-      environment: process.env.KALSHI_ENV || 'demo',
-      balance: balance.mock ? null : balance,
-      mock: balance.mock,
+      environment: (process.env.KALSHI_ENV || 'demo').trim(),
+      balance: {
+        available: balance.available,
+        total: balance.total,
+      },
       timestamp: new Date().toISOString(),
     });
   } catch (error) {
@@ -35,7 +47,7 @@ export async function GET() {
       ok: false,
       configured: true,
       error: message,
-      environment: process.env.KALSHI_ENV || 'demo',
+      environment: (process.env.KALSHI_ENV || 'demo').trim(),
     }, { status: 500 });
   }
 }

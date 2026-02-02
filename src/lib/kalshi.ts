@@ -334,6 +334,45 @@ class KalshiClient {
     }
   }
 
+  async getBalanceWithError(): Promise<{ available: number; total: number; error?: string }> {
+    if (!this.isConfigured()) {
+      return { available: 0, total: 0, error: 'Client not configured' };
+    }
+
+    try {
+      const path = '/trade-api/v2/portfolio/balance';
+      const headers = await this.getAuthHeaders('GET', path);
+      const url = `${this.getBaseUrl()}/portfolio/balance`;
+      
+      console.log('Fetching balance from:', url);
+      console.log('Headers:', JSON.stringify(headers, null, 2));
+      
+      const response = await fetch(url, { headers });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        let errorMessage = `Kalshi API error ${response.status}`;
+        try {
+          const errorJson = JSON.parse(errorText);
+          errorMessage = errorJson.error?.message || errorJson.message || errorMessage;
+        } catch {
+          errorMessage = errorText || errorMessage;
+        }
+        return { available: 0, total: 0, error: errorMessage };
+      }
+
+      const data = await response.json();
+      return {
+        available: data.balance / 100,
+        total: (data.balance + data.portfolio_value) / 100,
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      console.error('Kalshi getBalanceWithError error:', error);
+      return { available: 0, total: 0, error: message };
+    }
+  }
+
   // Mock data for demo mode
   private getMockEvents(): KalshiEvent[] {
     return [
