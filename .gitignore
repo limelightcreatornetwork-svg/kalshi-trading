@@ -42,3 +42,11 @@ next-env.d.ts
 
 /src/generated/prisma
 .env*.local
+
+# Development scripts with credentials (should not be committed)
+execute-bet.ts
+find-best-bet.ts
+sb-events-search.ts
+superbowl-search.ts
+find-superbowl-best.ts
+search-all-sports.ts
