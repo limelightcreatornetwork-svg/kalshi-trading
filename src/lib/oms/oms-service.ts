@@ -5,7 +5,6 @@
  * and integration with Kalshi API.
  */
 
-import { PrismaClient } from '@prisma/client';
 import { kalshiClient } from '../kalshi';
 import { orderStateMachine, InvalidTransitionError } from './state-machine';
 import {
@@ -20,8 +19,22 @@ import {
   Fill,
 } from './types';
 
-// Initialize Prisma client
-const prisma = new PrismaClient();
+// Lazy-initialize Prisma client only when DATABASE_URL is available
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let prisma: any = null;
+
+function getPrisma() {
+  if (!prisma) {
+    if (!process.env.DATABASE_URL) {
+      throw new Error('DATABASE_URL is required for OMS operations');
+    }
+    // Dynamic import to avoid build-time initialization
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { PrismaClient } = require('@prisma/client');
+    prisma = new PrismaClient();
+  }
+  return prisma;
+}
 
 /**
  * Generate a unique client order ID
@@ -41,7 +54,7 @@ export class OrderManagementService {
     const clientOrderId = params.clientOrderId || generateClientOrderId();
 
     // Check for existing order with same clientOrderId (idempotency)
-    const existing = await prisma.omsOrder.findUnique({
+    const existing = await getPrisma().omsOrder.findUnique({
       where: { clientOrderId },
       include: { transitions: true, fills: true },
     });
@@ -72,7 +85,7 @@ export class OrderManagementService {
 
     try {
       // Create order in DRAFT state with initial transition
-      const order = await prisma.omsOrder.create({
+      const order = await getPrisma().omsOrder.create({
         data: {
           clientOrderId,
           marketId: params.marketId,
@@ -119,7 +132,7 @@ export class OrderManagementService {
    * Transitions: DRAFT → PENDING → SUBMITTED → ACCEPTED
    */
   async submitOrder(orderId: string): Promise<OrderPlacementResult> {
-    const order = await prisma.omsOrder.findUnique({
+    const order = await getPrisma().omsOrder.findUnique({
       where: { id: orderId },
       include: { transitions: true, fills: true },
     });
@@ -162,7 +175,7 @@ export class OrderManagementService {
           { kalshiError: result.error }
         );
 
-        const rejectedOrder = await prisma.omsOrder.findUnique({
+        const rejectedOrder = await getPrisma().omsOrder.findUnique({
           where: { id: orderId },
           include: { transitions: true, fills: true },
         });
@@ -175,7 +188,7 @@ export class OrderManagementService {
       }
 
       // Update with Kalshi order ID and transition to ACCEPTED
-      const updatedOrder = await prisma.omsOrder.update({
+      const updatedOrder = await getPrisma().omsOrder.update({
         where: { id: orderId },
         data: { kalshiOrderId: result.order.order_id },
         include: { transitions: true, fills: true },
@@ -188,7 +201,7 @@ export class OrderManagementService {
         { kalshiOrderId: result.order.order_id, mock: result.mock }
       );
 
-      const finalOrder = await prisma.omsOrder.findUnique({
+      const finalOrder = await getPrisma().omsOrder.findUnique({
         where: { id: orderId },
         include: { transitions: true, fills: true },
       });
@@ -239,7 +252,7 @@ export class OrderManagementService {
    * Cancel an order
    */
   async cancelOrder(orderId: string, reason?: string): Promise<OrderCancelResult> {
-    const order = await prisma.omsOrder.findUnique({
+    const order = await getPrisma().omsOrder.findUnique({
       where: { id: orderId },
       include: { transitions: true, fills: true },
     });
@@ -275,7 +288,7 @@ export class OrderManagementService {
         reason || 'Order canceled by user'
       );
 
-      const canceledOrder = await prisma.omsOrder.findUnique({
+      const canceledOrder = await getPrisma().omsOrder.findUnique({
         where: { id: orderId },
         include: { transitions: true, fills: true },
       });
@@ -300,7 +313,7 @@ export class OrderManagementService {
     orderId: string,
     newParams: Partial<Pick<OrderCreateParams, 'contracts' | 'limitPrice'>>
   ): Promise<OrderAmendResult> {
-    const order = await prisma.omsOrder.findUnique({
+    const order = await getPrisma().omsOrder.findUnique({
       where: { id: orderId },
       include: { transitions: true, fills: true },
     });
@@ -365,7 +378,7 @@ export class OrderManagementService {
     fillPrice: number,
     kalshiFillId?: string
   ): Promise<Order | null> {
-    const order = await prisma.omsOrder.findUnique({
+    const order = await getPrisma().omsOrder.findUnique({
       where: { id: orderId },
       include: { transitions: true, fills: true },
     });
@@ -389,7 +402,7 @@ export class OrderManagementService {
 
     try {
       // Record the fill and update order
-      const updatedOrder = await prisma.omsOrder.update({
+      const updatedOrder = await getPrisma().omsOrder.update({
         where: { id: orderId },
         data: {
           filledContracts: order.filledContracts + fillContracts,
@@ -415,7 +428,7 @@ export class OrderManagementService {
         );
       }
 
-      const finalOrder = await prisma.omsOrder.findUnique({
+      const finalOrder = await getPrisma().omsOrder.findUnique({
         where: { id: orderId },
         include: { transitions: true, fills: true },
       });
@@ -453,7 +466,7 @@ export class OrderManagementService {
 
     try {
       // Get all non-terminal orders
-      const activeOrders = await prisma.omsOrder.findMany({
+      const activeOrders = await getPrisma().omsOrder.findMany({
         where: {
           state: {
             in: [
@@ -498,7 +511,7 @@ export class OrderManagementService {
    * Get an order by ID
    */
   async getOrder(orderId: string): Promise<Order | null> {
-    const order = await prisma.omsOrder.findUnique({
+    const order = await getPrisma().omsOrder.findUnique({
       where: { id: orderId },
       include: { transitions: true, fills: true },
     });
@@ -510,7 +523,7 @@ export class OrderManagementService {
    * Get an order by client order ID
    */
   async getOrderByClientId(clientOrderId: string): Promise<Order | null> {
-    const order = await prisma.omsOrder.findUnique({
+    const order = await getPrisma().omsOrder.findUnique({
       where: { clientOrderId },
       include: { transitions: true, fills: true },
     });
@@ -551,7 +564,8 @@ export class OrderManagementService {
     ]);
 
     return {
-      orders: orders.map((o) => this.mapPrismaOrder(o)),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      orders: orders.map((o: any) => this.mapPrismaOrder(o)),
       total,
     };
   }
@@ -560,12 +574,13 @@ export class OrderManagementService {
    * Get fills for an order
    */
   async getOrderFills(orderId: string): Promise<Fill[]> {
-    const fills = await prisma.omsFill.findMany({
+    const fills = await getPrisma().omsFill.findMany({
       where: { orderId },
       orderBy: { timestamp: 'asc' },
     });
 
-    return fills.map((f) => ({
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return fills.map((f: any) => ({
       id: f.id,
       orderId: f.orderId,
       contracts: f.contracts,
@@ -584,7 +599,7 @@ export class OrderManagementService {
     reason?: string,
     metadata?: Record<string, unknown>
   ): Promise<void> {
-    const order = await prisma.omsOrder.findUnique({
+    const order = await getPrisma().omsOrder.findUnique({
       where: { id: orderId },
     });
 
@@ -600,7 +615,7 @@ export class OrderManagementService {
     }
 
     // Update order state and create transition record
-    await prisma.$transaction([
+    await getPrisma().$transaction([
       prisma.omsOrder.update({
         where: { id: orderId },
         data: {

@@ -393,6 +393,7 @@ class KalshiClient {
 
   private getMockMarkets(): KalshiMarket[] {
     return [
+      // Normal market - no arbitrage
       {
         ticker: 'FED-26MAR-T5.00',
         event_ticker: 'FED-RATE-26MAR',
@@ -407,33 +408,79 @@ class KalshiClient {
         status: 'active',
         expiration_time: '2026-03-26T18:00:00Z',
       },
+      // ARBITRAGE OPPORTUNITY: YES + NO asks = 95 (buy both for 5¢ profit!)
       {
         ticker: 'RAIN-NYC-26FEB01',
         event_ticker: 'WEATHER-NYC-26FEB',
         title: 'Rain in NYC on Feb 1, 2026',
-        yes_bid: 70,
-        yes_ask: 74,
-        no_bid: 26,
-        no_ask: 30,
-        last_price: 72,
+        yes_bid: 65,
+        yes_ask: 68,
+        no_bid: 25,
+        no_ask: 27, // 68 + 27 = 95 < 100 → arbitrage!
+        last_price: 67,
         volume: 8200,
         open_interest: 4100,
         status: 'active',
-        expiration_time: '2026-02-01T23:59:59Z',
+        expiration_time: '2026-02-05T23:59:59Z',
       },
+      // ARBITRAGE OPPORTUNITY: YES + NO asks = 97 (buy both for 3¢ profit!)
       {
         ticker: 'BTC-100K-26Q1',
         event_ticker: 'CRYPTO-BTC-26Q1',
         title: 'Bitcoin above $100K end of Q1 2026',
-        yes_bid: 46,
-        yes_ask: 50,
-        no_bid: 50,
-        no_ask: 54,
-        last_price: 48,
+        yes_bid: 44,
+        yes_ask: 47,
+        no_bid: 48,
+        no_ask: 50, // 47 + 50 = 97 < 100 → arbitrage!
+        last_price: 46,
         volume: 45000,
         open_interest: 22000,
         status: 'active',
         expiration_time: '2026-03-31T23:59:59Z',
+      },
+      // Cross-market arbitrage setup - Fed rate brackets (mutually exclusive)
+      {
+        ticker: 'FED-26MAR-T4.50',
+        event_ticker: 'FED-RATE-26MAR',
+        title: 'Fed rate between 4.25% - 4.50%',
+        yes_bid: 18,
+        yes_ask: 22,
+        no_bid: 75,
+        no_ask: 82,
+        last_price: 20,
+        volume: 5000,
+        open_interest: 3000,
+        status: 'active',
+        expiration_time: '2026-03-26T18:00:00Z',
+      },
+      {
+        ticker: 'FED-26MAR-T4.75',
+        event_ticker: 'FED-RATE-26MAR',
+        title: 'Fed rate between 4.50% - 4.75%',
+        yes_bid: 35,
+        yes_ask: 40,
+        no_bid: 57,
+        no_ask: 65,
+        last_price: 38,
+        volume: 8000,
+        open_interest: 4500,
+        status: 'active',
+        expiration_time: '2026-03-26T18:00:00Z',
+      },
+      // ARBITRAGE: sell both YES bids for 105¢ (5¢ profit if you hold positions)
+      {
+        ticker: 'ETH-5K-26FEB',
+        event_ticker: 'CRYPTO-ETH-26FEB',
+        title: 'Ethereum above $5K by Feb 28, 2026',
+        yes_bid: 55, // 55 + 50 = 105 > 100 → sell arb!
+        yes_ask: 60,
+        no_bid: 50,
+        no_ask: 55,
+        last_price: 57,
+        volume: 32000,
+        open_interest: 18000,
+        status: 'active',
+        expiration_time: '2026-02-28T23:59:59Z',
       },
     ];
   }
