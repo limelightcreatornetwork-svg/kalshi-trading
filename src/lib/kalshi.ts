@@ -5,6 +5,8 @@
  * API Documentation: https://trading-api.readme.io/reference/getting-started
  */
 
+import crypto from 'crypto';
+
 export interface KalshiConfig {
   apiKeyId: string;
   privateKey: string;
@@ -84,17 +86,41 @@ class KalshiClient {
     return BASE_URLS[this.config?.environment || 'demo'];
   }
 
-  private async getAuthHeaders(): Promise<Record<string, string>> {
+  private signRequest(method: string, path: string, timestamp: number): string {
     if (!this.config) {
       throw new Error('Kalshi client not configured');
     }
 
-    // For now, return basic auth headers
-    // Real implementation would use RSA signing with private key
+    // Kalshi signature format: method + timestamp + path
+    const message = `${timestamp}${method}${path}`;
+    
+    // Format the private key properly
+    let privateKey = this.config.privateKey;
+    if (!privateKey.includes('-----BEGIN')) {
+      privateKey = `-----BEGIN RSA PRIVATE KEY-----\n${privateKey}\n-----END RSA PRIVATE KEY-----`;
+    }
+
+    const sign = crypto.createSign('RSA-SHA256');
+    sign.update(message);
+    sign.end();
+    
+    const signature = sign.sign(privateKey, 'base64');
+    return signature;
+  }
+
+  private async getAuthHeaders(method: string = 'GET', path: string = ''): Promise<Record<string, string>> {
+    if (!this.config) {
+      throw new Error('Kalshi client not configured');
+    }
+
+    const timestamp = Math.floor(Date.now() / 1000);
+    const signature = this.signRequest(method, path, timestamp);
+
     return {
       'Content-Type': 'application/json',
-      // Kalshi uses RSA signature-based auth
-      // This is a placeholder - real implementation needs crypto signing
+      'KALSHI-ACCESS-KEY': this.config.apiKeyId,
+      'KALSHI-ACCESS-SIGNATURE': signature,
+      'KALSHI-ACCESS-TIMESTAMP': timestamp.toString(),
     };
   }
 
@@ -113,9 +139,10 @@ class KalshiClient {
       if (params?.status) queryParams.set('status', params.status);
       if (params?.limit) queryParams.set('limit', params.limit.toString());
 
+      const path = `/trade-api/v2/events?${queryParams}`;
       const response = await fetch(
         `${this.getBaseUrl()}/events?${queryParams}`,
-        { headers: await this.getAuthHeaders() }
+        { headers: await this.getAuthHeaders('GET', path) }
       );
 
       if (!response.ok) {
@@ -147,9 +174,10 @@ class KalshiClient {
       if (params?.ticker) queryParams.set('ticker', params.ticker);
       if (params?.limit) queryParams.set('limit', params.limit.toString());
 
+      const path = `/trade-api/v2/markets?${queryParams}`;
       const response = await fetch(
         `${this.getBaseUrl()}/markets?${queryParams}`,
-        { headers: await this.getAuthHeaders() }
+        { headers: await this.getAuthHeaders('GET', path) }
       );
 
       if (!response.ok) {
@@ -170,9 +198,10 @@ class KalshiClient {
     }
 
     try {
+      const path = '/trade-api/v2/portfolio/positions';
       const response = await fetch(
         `${this.getBaseUrl()}/portfolio/positions`,
-        { headers: await this.getAuthHeaders() }
+        { headers: await this.getAuthHeaders('GET', path) }
       );
 
       if (!response.ok) {
@@ -216,11 +245,12 @@ class KalshiClient {
     }
 
     try {
+      const path = '/trade-api/v2/portfolio/orders';
       const response = await fetch(
         `${this.getBaseUrl()}/portfolio/orders`,
         {
           method: 'POST',
-          headers: await this.getAuthHeaders(),
+          headers: await this.getAuthHeaders('POST', path),
           body: JSON.stringify(order),
         }
       );
@@ -248,11 +278,12 @@ class KalshiClient {
     }
 
     try {
+      const path = `/trade-api/v2/portfolio/orders/${orderId}`;
       const response = await fetch(
         `${this.getBaseUrl()}/portfolio/orders/${orderId}`,
         {
           method: 'DELETE',
-          headers: await this.getAuthHeaders(),
+          headers: await this.getAuthHeaders('DELETE', path),
         }
       );
 
@@ -274,9 +305,10 @@ class KalshiClient {
     }
 
     try {
+      const path = '/trade-api/v2/portfolio/balance';
       const response = await fetch(
         `${this.getBaseUrl()}/portfolio/balance`,
-        { headers: await this.getAuthHeaders() }
+        { headers: await this.getAuthHeaders('GET', path) }
       );
 
       if (!response.ok) {
