@@ -211,6 +211,36 @@ function getAuthHeaders(method: string, path: string): Record<string, string> {
 // API Request Helper
 // ============================================================================
 
+const DEFAULT_TIMEOUT_MS = 30000;
+const MAX_RETRIES = 3;
+const RETRY_BASE_DELAY_MS = 1000;
+
+// Status codes that are safe to retry
+const RETRYABLE_STATUS_CODES = new Set([408, 429, 500, 502, 503, 504]);
+
+async function fetchWithTimeout(
+  url: string,
+  options: RequestInit,
+  timeoutMs: number = DEFAULT_TIMEOUT_MS
+): Promise<Response> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const response = await fetch(url, {
+      ...options,
+      signal: controller.signal,
+    });
+    return response;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 async function apiRequest<T>(
   method: string,
   endpoint: string,
@@ -224,35 +254,75 @@ async function apiRequest<T>(
   const path = `/trade-api/v2${endpoint}`;
   const url = `${baseUrl}${endpoint}`;
 
-  console.log(`[Kalshi API] ${method} ${url}`);
+  let lastError: Error | null = null;
 
-  const headers = getAuthHeaders(method, path);
-
-  const options: RequestInit = {
-    method,
-    headers,
-  };
-
-  if (body) {
-    options.body = JSON.stringify(body);
-  }
-
-  const response = await fetch(url, options);
-
-  if (!response.ok) {
-    let apiMessage = `HTTP ${response.status}`;
+  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     try {
-      const errorData = await response.json();
-      apiMessage = errorData.error?.message || errorData.message || apiMessage;
-    } catch {
-      // If we can't parse JSON, use the status text
-      apiMessage = response.statusText || apiMessage;
+      // Generate fresh auth headers for each attempt (timestamp must be current)
+      const headers = getAuthHeaders(method, path);
+
+      const options: RequestInit = {
+        method,
+        headers,
+      };
+
+      if (body) {
+        options.body = JSON.stringify(body);
+      }
+
+      const response = await fetchWithTimeout(url, options);
+
+      if (!response.ok) {
+        let apiMessage = `HTTP ${response.status}`;
+        try {
+          const errorData = await response.json();
+          apiMessage = errorData.error?.message || errorData.message || apiMessage;
+        } catch {
+          apiMessage = response.statusText || apiMessage;
+        }
+
+        // Check if this error is retryable
+        if (RETRYABLE_STATUS_CODES.has(response.status) && attempt < MAX_RETRIES - 1) {
+          const delayMs = RETRY_BASE_DELAY_MS * Math.pow(2, attempt);
+          await sleep(delayMs);
+          continue;
+        }
+
+        throw new KalshiApiError(response.status, apiMessage);
+      }
+
+      return response.json();
+    } catch (error) {
+      lastError = error as Error;
+
+      // Handle timeout/abort errors
+      if (error instanceof Error && error.name === 'AbortError') {
+        if (attempt < MAX_RETRIES - 1) {
+          const delayMs = RETRY_BASE_DELAY_MS * Math.pow(2, attempt);
+          await sleep(delayMs);
+          continue;
+        }
+        throw new KalshiApiError(408, 'Request timeout');
+      }
+
+      // Handle network errors (fetch failed)
+      if (error instanceof TypeError && attempt < MAX_RETRIES - 1) {
+        const delayMs = RETRY_BASE_DELAY_MS * Math.pow(2, attempt);
+        await sleep(delayMs);
+        continue;
+      }
+
+      // Re-throw KalshiApiError as-is
+      if (error instanceof KalshiApiError) {
+        throw error;
+      }
+
+      throw error;
     }
-    console.error(`[Kalshi API] Error: ${response.status} - ${apiMessage}`);
-    throw new KalshiApiError(response.status, apiMessage);
   }
 
-  return response.json();
+  // Should not reach here, but just in case
+  throw lastError || new KalshiApiError(500, 'Unknown error after retries');
 }
 
 // ============================================================================
