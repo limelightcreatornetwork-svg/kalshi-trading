@@ -246,3 +246,63 @@ model CalendarEvent {
   @@index([eventDate])
   @@index([category])
 }
+
+// ============================================
+// ORDER MANAGEMENT SYSTEM (OMS)
+// ============================================
+
+// OMS Order - Enhanced order with state machine
+model OmsOrder {
+  id              String    @id @default(cuid())
+  clientOrderId   String    @unique // For idempotent order placement
+  kalshiOrderId   String?   @unique // External Kalshi order ID
+  marketId        String    // Market ticker
+  action          String    // buy, sell
+  side            String    // yes, no
+  type            String    @default("limit") // market, limit
+  contracts       Int       // Total contracts requested
+  limitPrice      Int?      // Limit price in cents (1-99)
+  filledContracts Int       @default(0)
+  avgFillPrice    Float?    // Average fill price in cents
+  state           String    @default("DRAFT") // DRAFT, PENDING, SUBMITTED, ACCEPTED, PARTIAL_FILL, FILLED, CANCELED, REJECTED, EXPIRED
+  rejectReason    String?   // Reason for rejection
+  expiresAt       DateTime? // Order expiration time
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  
+  transitions     OmsStateTransition[]
+  fills           OmsFill[]
+
+  @@index([state])
+  @@index([marketId])
+  @@index([createdAt])
+}
+
+// OMS State Transition - Audit log for state changes
+model OmsStateTransition {
+  id          String   @id @default(cuid())
+  orderId     String
+  order       OmsOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  fromState   String?  // Null for initial state
+  toState     String
+  reason      String?
+  metadata    Json?    // Additional context for the transition
+  timestamp   DateTime @default(now())
+
+  @@index([orderId])
+  @@index([timestamp])
+}
+
+// OMS Fill - Records of order fills
+model OmsFill {
+  id            String   @id @default(cuid())
+  orderId       String
+  order         OmsOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  contracts     Int      // Number of contracts filled
+  price         Float    // Fill price in cents
+  kalshiFillId  String?  // External Kalshi fill ID
+  timestamp     DateTime @default(now())
+
+  @@index([orderId])
+  @@index([timestamp])
+}
