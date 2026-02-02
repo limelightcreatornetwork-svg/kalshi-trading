@@ -83,7 +83,9 @@ class KalshiClient {
   }
 
   private getBaseUrl(): string {
-    return BASE_URLS[this.config?.environment || 'demo'];
+    const env = (this.config?.environment || 'demo').trim().toLowerCase();
+    const validEnv = (env === 'production' || env === 'demo') ? env : 'demo';
+    return BASE_URLS[validEnv as keyof typeof BASE_URLS];
   }
 
   private formatPrivateKey(key: string): string {
@@ -509,9 +511,11 @@ export const kalshiClient = new KalshiClient();
 
 // Initialize from environment
 if (process.env.KALSHI_API_KEY_ID && process.env.KALSHI_API_PRIVATE_KEY) {
+  const envValue = (process.env.KALSHI_ENV || 'demo').trim().toLowerCase();
+  const validEnv = (envValue === 'production' || envValue === 'demo') ? envValue : 'demo';
   kalshiClient.configure({
-    apiKeyId: process.env.KALSHI_API_KEY_ID,
-    privateKey: process.env.KALSHI_API_PRIVATE_KEY,
-    environment: (process.env.KALSHI_ENV as 'demo' | 'production') || 'demo',
+    apiKeyId: process.env.KALSHI_API_KEY_ID.trim(),
+    privateKey: process.env.KALSHI_API_PRIVATE_KEY.trim(),
+    environment: validEnv as 'demo' | 'production',
   });
 }
