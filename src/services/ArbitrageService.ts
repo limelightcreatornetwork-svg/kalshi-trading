@@ -1,0 +1,426 @@
+// Arbitrage Detection Service
+// Scans Kalshi markets for pricing inefficiencies
+
+import { v4 as uuid } from 'uuid';
+import { getMarkets, createOrder, Market } from '@/lib/kalshi';
+import type { 
+  ArbitrageOpportunity, 
+  ArbitrageScanResult, 
+  MarketWithArbitrage,
+  ArbitrageExecuteRequest,
+  ArbitrageExecuteResult
+} from '@/types/arbitrage';
+import { requirePrisma } from '@/lib/prisma';
+
+// Minimum profit in cents to consider an opportunity worth tracking
+const MIN_PROFIT_CENTS = 0.5;
+
+// Minimum profit percentage to consider
+const MIN_PROFIT_PERCENT = 0.5;
+
+export class ArbitrageService {
+  /**
+   * Scan all active markets for arbitrage opportunities
+   * 
+   * Single-market arbitrage occurs when:
+   * - yesAsk + noAsk < 100 cents (buy both sides, guarantee profit)
+   * 
+   * This is the "free money" scenario where market makers haven't
+   * properly priced the binary options.
+   */
+  async scanForOpportunities(): Promise<ArbitrageScanResult> {
+    const startTime = Date.now();
+    const scanId = uuid();
+    
+    const allMarkets: MarketWithArbitrage[] = [];
+    const opportunities: ArbitrageOpportunity[] = [];
+    
+    let cursor: string | undefined;
+    let totalMarketsScanned = 0;
+    
+    // Paginate through all active markets
+    do {
+      const response = await getMarkets({
+        limit: 100,
+        cursor,
+        status: 'open',
+      });
+      
+      for (const market of response.markets) {
+        const analysis = this.analyzeMarket(market);
+        allMarkets.push(analysis);
+        totalMarketsScanned++;
+        
+        if (analysis.hasArbitrage && analysis.profitCents >= MIN_PROFIT_CENTS) {
+          const opportunity = await this.createOrUpdateOpportunity(analysis, market);
+          opportunities.push(opportunity);
+        }
+      }
+      
+      cursor = response.cursor || undefined;
+    } while (cursor);
+    
+    // Mark opportunities that weren't seen in this scan as potentially expired
+    await this.markStaleOpportunities(opportunities.map(o => o.id));
+    
+    const scanDurationMs = Date.now() - startTime;
+    const totalProfitPotential = opportunities.reduce((sum, o) => sum + o.profitCents, 0);
+    
+    // Record the scan
+    await requirePrisma().arbitrageScan.create({
+      data: {
+        marketsScanned: totalMarketsScanned,
+        opportunitiesFound: opportunities.length,
+        totalProfitPotential,
+        scanDurationMs,
+        completedAt: new Date(),
+      },
+    });
+    
+    return {
+      scanId,
+      marketsScanned: totalMarketsScanned,
+      opportunitiesFound: opportunities.length,
+      totalProfitPotential,
+      scanDurationMs,
+      opportunities: opportunities.sort((a, b) => b.profitCents - a.profitCents),
+      allMarkets: allMarkets.sort((a, b) => b.profitCents - a.profitCents),
+    };
+  }
+  
+  /**
+   * Analyze a single market for arbitrage opportunity
+   */
+  analyzeMarket(market: Market): MarketWithArbitrage {
+    // Kalshi prices are in cents (0-100)
+    const yesBid = market.yes_bid || 0;
+    const yesAsk = market.yes_ask || 0;
+    const noBid = market.no_bid || 0;
+    const noAsk = market.no_ask || 0;
+    
+    // Cost to buy both YES and NO at ask prices
+    // If < 100, we can buy both for less than guaranteed payout
+    const buyBothCost = yesAsk + noAsk;
+    
+    // Revenue if we sell both YES and NO at bid prices
+    const sellBothRevenue = yesBid + noBid;
+    
+    // Profit = Guaranteed payout (100) - Cost to buy both
+    const profitCents = 100 - buyBothCost;
+    
+    // ROI = Profit / Cost
+    const profitPercent = buyBothCost > 0 ? (profitCents / buyBothCost) * 100 : 0;
+    
+    // Arbitrage exists if we can buy both for < $1.00
+    // We also need both asks to be available (not 0)
+    const hasArbitrage = buyBothCost < 100 && yesAsk > 0 && noAsk > 0 && profitCents >= MIN_PROFIT_CENTS;
+    
+    return {
+      ticker: market.ticker,
+      eventTicker: market.event_ticker,
+      title: market.title,
+      status: market.status,
+      yesBid,
+      yesAsk,
+      noBid,
+      noAsk,
+      buyBothCost,
+      sellBothRevenue,
+      hasArbitrage,
+      profitCents: hasArbitrage ? profitCents : 0,
+      profitPercent: hasArbitrage ? profitPercent : 0,
+      volume24h: market.volume_24h || 0,
+      openInterest: market.open_interest || 0,
+    };
+  }
+  
+  /**
+   * Create or update an arbitrage opportunity in the database
+   */
+  private async createOrUpdateOpportunity(
+    analysis: MarketWithArbitrage,
+    market: Market
+  ): Promise<ArbitrageOpportunity> {
+    // Check if we already have an active opportunity for this market
+    const existing = await requirePrisma().arbitrageOpportunity.findFirst({
+      where: {
+        marketTicker: market.ticker,
+        status: 'ACTIVE',
+      },
+    });
+    
+    if (existing) {
+      // Update the existing opportunity
+      const updated = await requirePrisma().arbitrageOpportunity.update({
+        where: { id: existing.id },
+        data: {
+          yesBid: analysis.yesBid,
+          yesAsk: analysis.yesAsk,
+          noBid: analysis.noBid,
+          noAsk: analysis.noAsk,
+          totalCost: analysis.buyBothCost,
+          profitCents: analysis.profitCents,
+          profitPercent: analysis.profitPercent,
+          lastSeenAt: new Date(),
+        },
+      });
+      
+      return this.mapDbToOpportunity(updated);
+    }
+    
+    // Create new opportunity
+    const created = await requirePrisma().arbitrageOpportunity.create({
+      data: {
+        type: 'SINGLE_MARKET',
+        status: 'ACTIVE',
+        marketTicker: market.ticker,
+        marketTitle: market.title,
+        yesBid: analysis.yesBid,
+        yesAsk: analysis.yesAsk,
+        noBid: analysis.noBid,
+        noAsk: analysis.noAsk,
+        totalCost: analysis.buyBothCost,
+        guaranteedPayout: 100,
+        profitCents: analysis.profitCents,
+        profitPercent: analysis.profitPercent,
+      },
+    });
+    
+    return this.mapDbToOpportunity(created);
+  }
+  
+  /**
+   * Mark opportunities not seen in recent scan as potentially expired
+   */
+  private async markStaleOpportunities(activeIds: string[]): Promise<void> {
+    const staleThreshold = new Date(Date.now() - 5 * 60 * 1000); // 5 minutes
+    
+    await requirePrisma().arbitrageOpportunity.updateMany({
+      where: {
+        status: 'ACTIVE',
+        lastSeenAt: { lt: staleThreshold },
+        id: { notIn: activeIds },
+      },
+      data: {
+        status: 'EXPIRED',
+        expiredAt: new Date(),
+      },
+    });
+  }
+  
+  /**
+   * Get all active opportunities
+   */
+  async getActiveOpportunities(): Promise<ArbitrageOpportunity[]> {
+    const opportunities = await requirePrisma().arbitrageOpportunity.findMany({
+      where: { status: 'ACTIVE' },
+      orderBy: { profitCents: 'desc' },
+    });
+    
+    return opportunities.map(this.mapDbToOpportunity);
+  }
+  
+  /**
+   * Get opportunity history
+   */
+  async getOpportunityHistory(params?: {
+    limit?: number;
+    type?: string;
+    status?: string;
+    minProfitCents?: number;
+  }): Promise<ArbitrageOpportunity[]> {
+    const opportunities = await requirePrisma().arbitrageOpportunity.findMany({
+      where: {
+        ...(params?.type && { type: params.type as any }),
+        ...(params?.status && { status: params.status as any }),
+        ...(params?.minProfitCents && { profitCents: { gte: params.minProfitCents } }),
+      },
+      orderBy: { detectedAt: 'desc' },
+      take: params?.limit || 100,
+    });
+    
+    return opportunities.map(this.mapDbToOpportunity);
+  }
+  
+  /**
+   * Execute an arbitrage opportunity by buying both YES and NO
+   */
+  async executeOpportunity(request: ArbitrageExecuteRequest): Promise<ArbitrageExecuteResult> {
+    const opportunity = await requirePrisma().arbitrageOpportunity.findUnique({
+      where: { id: request.opportunityId },
+    });
+    
+    if (!opportunity) {
+      return { success: false, opportunityId: request.opportunityId, error: 'Opportunity not found' };
+    }
+    
+    if (opportunity.status !== 'ACTIVE') {
+      return { success: false, opportunityId: request.opportunityId, error: `Opportunity is ${opportunity.status}` };
+    }
+    
+    try {
+      // Place YES order
+      const yesOrder = await createOrder({
+        ticker: opportunity.marketTicker,
+        side: 'yes',
+        action: 'buy',
+        count: request.contracts,
+        type: 'limit',
+        yes_price: Number(opportunity.yesAsk),
+      });
+      
+      // Place NO order
+      const noOrder = await createOrder({
+        ticker: opportunity.marketTicker,
+        side: 'no',
+        action: 'buy',
+        count: request.contracts,
+        type: 'limit',
+        no_price: Number(opportunity.noAsk),
+      });
+      
+      const totalCost = (Number(opportunity.yesAsk) + Number(opportunity.noAsk)) * request.contracts;
+      const expectedProfit = Number(opportunity.profitCents) * request.contracts;
+      
+      // Update opportunity as executed
+      await requirePrisma().arbitrageOpportunity.update({
+        where: { id: request.opportunityId },
+        data: {
+          status: 'EXECUTED',
+          executedAt: new Date(),
+          executedContracts: request.contracts,
+          actualProfit: expectedProfit,
+        },
+      });
+      
+      return {
+        success: true,
+        opportunityId: request.opportunityId,
+        yesOrderId: yesOrder.order.order_id,
+        noOrderId: noOrder.order.order_id,
+        yesPrice: Number(opportunity.yesAsk),
+        noPrice: Number(opportunity.noAsk),
+        totalCost,
+        expectedProfit,
+      };
+    } catch (error) {
+      // Mark as missed if we couldn't execute
+      await requirePrisma().arbitrageOpportunity.update({
+        where: { id: request.opportunityId },
+        data: { status: 'MISSED' },
+      });
+      
+      return {
+        success: false,
+        opportunityId: request.opportunityId,
+        error: error instanceof Error ? error.message : 'Unknown error',
+      };
+    }
+  }
+  
+  /**
+   * Get scan statistics
+   */
+  async getScanStats(): Promise<{
+    totalScans: number;
+    totalOpportunities: number;
+    avgProfitCents: number;
+    totalProfitPotential: number;
+    executedCount: number;
+    totalActualProfit: number;
+  }> {
+    const [scans, opportunities, executed] = await Promise.all([
+      requirePrisma().arbitrageScan.aggregate({
+        _count: true,
+        _sum: { opportunitiesFound: true, totalProfitPotential: true },
+      }),
+      requirePrisma().arbitrageOpportunity.aggregate({
+        _count: true,
+        _avg: { profitCents: true },
+        _sum: { profitCents: true },
+      }),
+      requirePrisma().arbitrageOpportunity.aggregate({
+        where: { status: 'EXECUTED' },
+        _count: true,
+        _sum: { actualProfit: true },
+      }),
+    ]);
+    
+    return {
+      totalScans: scans._count,
+      totalOpportunities: opportunities._count,
+      avgProfitCents: Number(opportunities._avg?.profitCents || 0),
+      totalProfitPotential: Number(opportunities._sum?.profitCents || 0),
+      executedCount: executed._count,
+      totalActualProfit: Number(executed._sum?.actualProfit || 0),
+    };
+  }
+  
+  /**
+   * Check if alerts should be sent for high-value opportunities
+   */
+  async checkAlerts(): Promise<ArbitrageOpportunity[]> {
+    const config = await requirePrisma().arbitrageAlertConfig.findFirst({
+      where: { isActive: true },
+    });
+    
+    if (!config || !config.alertEnabled) {
+      return [];
+    }
+    
+    const opportunities = await requirePrisma().arbitrageOpportunity.findMany({
+      where: {
+        status: 'ACTIVE',
+        alertSent: false,
+        profitCents: { gte: Number(config.minProfitCents) },
+        profitPercent: { gte: Number(config.minProfitPercent) },
+      },
+    });
+    
+    // Mark alerts as sent
+    if (opportunities.length > 0) {
+      await requirePrisma().arbitrageOpportunity.updateMany({
+        where: { id: { in: opportunities.map(o => o.id) } },
+        data: { alertSent: true, alertSentAt: new Date() },
+      });
+    }
+    
+    return opportunities.map(this.mapDbToOpportunity);
+  }
+  
+  /**
+   * Map database model to API type
+   */
+  private mapDbToOpportunity(db: any): ArbitrageOpportunity {
+    return {
+      id: db.id,
+      type: db.type,
+      status: db.status,
+      marketTicker: db.marketTicker,
+      marketTitle: db.marketTitle,
+      relatedMarketTicker: db.relatedMarketTicker || undefined,
+      relatedMarketTitle: db.relatedMarketTitle || undefined,
+      yesBid: Number(db.yesBid),
+      yesAsk: Number(db.yesAsk),
+      noBid: Number(db.noBid),
+      noAsk: Number(db.noAsk),
+      totalCost: Number(db.totalCost),
+      guaranteedPayout: Number(db.guaranteedPayout),
+      profitCents: Number(db.profitCents),
+      profitPercent: Number(db.profitPercent),
+      maxContracts: db.maxContracts || undefined,
+      estimatedMaxProfit: db.estimatedMaxProfit ? Number(db.estimatedMaxProfit) : undefined,
+      executedAt: db.executedAt?.toISOString(),
+      executedContracts: db.executedContracts || undefined,
+      actualProfit: db.actualProfit ? Number(db.actualProfit) : undefined,
+      alertSent: db.alertSent,
+      alertSentAt: db.alertSentAt?.toISOString(),
+      detectedAt: db.detectedAt.toISOString(),
+      lastSeenAt: db.lastSeenAt.toISOString(),
+      expiredAt: db.expiredAt?.toISOString(),
+    };
+  }
+}
+
+// Export singleton instance
+export const arbitrageService = new ArbitrageService();

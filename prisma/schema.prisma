@@ -1,308 +1,493 @@
+// Kalshi Trading Platform - Prisma Schema
+// Tier 1 Foundation: Order lifecycle, Idempotency, Kill switches, Position caps, Secrets isolation
+
 generator client {
-  provider   = "prisma-client-js"
-  engineType = "library"
+  provider = "prisma-client-js"
 }
 
 datasource db {
   provider = "postgresql"
 }
 
-// Kalshi Event (collection of related markets)
-model Event {
-  id              String    @id
-  ticker          String    @unique
+// ============================================
+// TIER 1: SECRETS ISOLATION (#30)
+// ============================================
+
+model ApiCredential {
+  id          String   @id @default(cuid())
+  name        String   // Human-readable name
+  provider    String   // "kalshi", "polygon", etc.
+  
+  // Encrypted credentials - never exposed to frontend
+  apiKey      String   @db.Text  // Encrypted
+  apiSecret   String?  @db.Text  // Encrypted (optional for some providers)
+  
+  // Scopes and permissions
+  scopes      String[] // ["read", "trade", "withdraw"]
+  isActive    Boolean  @default(true)
+  
+  // Audit
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  lastUsedAt  DateTime?
+  
+  @@unique([provider, name])
+  @@map("api_credentials")
+}
+
+// ============================================
+// TIER 1: KILL SWITCH HIERARCHY (#22)
+// ============================================
+
+enum KillSwitchLevel {
+  GLOBAL        // Everything stops
+  STRATEGY      // Specific strategy stops
+  MARKET        // Specific market stops
+  ACCOUNT       // Specific account stops
+}
+
+enum KillSwitchReason {
+  MANUAL        // Human triggered
+  LOSS_LIMIT    // Hit loss threshold
+  ERROR_RATE    // Too many errors
+  ANOMALY       // Detected unusual behavior
+  EXTERNAL      // External event (API issues, etc.)
+  SCHEDULED     // Planned maintenance
+}
+
+model KillSwitch {
+  id          String           @id @default(cuid())
+  level       KillSwitchLevel
+  targetId    String?          // Strategy ID, Market ID, or Account ID (null for GLOBAL)
+  
+  isActive    Boolean          @default(true)
+  reason      KillSwitchReason
+  description String?
+  
+  // Who triggered it
+  triggeredBy String           // "system" or user ID
+  triggeredAt DateTime         @default(now())
+  
+  // Auto-reset configuration
+  autoResetAt DateTime?        // If set, switch resets at this time
+  resetBy     String?          // Who reset it
+  resetAt     DateTime?
+  
+  // Audit trail
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  
+  @@index([level, isActive])
+  @@index([targetId])
+  @@map("kill_switches")
+}
+
+model KillSwitchConfig {
+  id              String           @id @default(cuid())
+  level           KillSwitchLevel
+  targetId        String?
+  
+  // Thresholds that trigger automatic kill
+  maxDailyLoss    Decimal?         @db.Decimal(18, 8)  // Max loss before kill
+  maxDrawdown     Decimal?         @db.Decimal(5, 4)   // Max drawdown percentage
+  maxErrorRate    Decimal?         @db.Decimal(5, 4)   // Max errors per minute
+  maxLatency      Int?             // Max API latency in ms
+  
+  isActive        Boolean          @default(true)
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  
+  @@unique([level, targetId])
+  @@map("kill_switch_configs")
+}
+
+// ============================================
+// TIER 1: PER-MARKET POSITION CAPS (#19)
+// ============================================
+
+model Market {
+  id              String    @id @default(cuid())
+  externalId      String    @unique  // Kalshi market ticker
   title           String
   category        String?
-  subCategory     String?
-  status          String    @default("open") // open, closed, settled
-  mutuallyExclusive Boolean @default(true)
-  markets         Market[]
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
-
-  @@index([category])
-  @@index([status])
-}
-
-// Kalshi Market (individual yes/no contract)
-model Market {
-  id              String    @id
-  ticker          String    @unique
-  eventId         String
-  event           Event     @relation(fields: [eventId], references: [id])
-  title           String
-  subtitle        String?
-  yesPrice        Float?    // Current yes price (0.01 - 0.99)
-  noPrice         Float?    // Current no price (0.01 - 0.99)
-  volume          Int       @default(0)
-  openInterest    Int       @default(0)
-  status          String    @default("active") // active, closed, settled
-  result          String?   // yes, no (after settlement)
-  expirationTime  DateTime?
+  
+  // Market state
+  status          String    @default("open")  // open, closed, settled
   closeTime       DateTime?
-  positions       Position[]
-  orders          Order[]
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
-
-  @@index([eventId])
-  @@index([status])
-  @@index([ticker])
-}
-
-// User positions in markets
-model Position {
-  id            String   @id @default(cuid())
-  marketId      String
-  market        Market   @relation(fields: [marketId], references: [id])
-  side          String   // yes, no
-  contracts     Int      // Number of contracts held
-  avgPrice      Float    // Average entry price
-  realizedPnl   Float    @default(0)
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-
-  @@unique([marketId, side])
-  @@index([marketId])
-}
-
-// Order history
-model Order {
-  id            String   @id @default(cuid())
-  marketId      String
-  market        Market   @relation(fields: [marketId], references: [id])
-  side          String   // yes, no
-  action        String   // buy, sell
-  type          String   @default("market") // market, limit
-  contracts     Int
-  price         Float?   // Limit price (null for market orders)
-  filledPrice   Float?   // Actual fill price
-  filledContracts Int    @default(0)
-  status        String   @default("pending") // pending, filled, partial, cancelled, rejected
-  kalshiOrderId String?  @unique // External Kalshi order ID
-  expiresAt     DateTime?
-  createdAt     DateTime @default(now())
-  filledAt      DateTime?
-
-  @@index([marketId])
-  @@index([status])
-}
-
-// Trading policy configuration
-model PolicyConfig {
-  id                String   @id @default(cuid())
-  maxOrderSize      Int      @default(100)      // Max contracts per order
-  maxDailyVolume    Int      @default(1000)     // Max daily trading volume
-  maxExposure       Float    @default(1000)     // Max dollar exposure
-  minLiquidity      Int      @default(100)      // Min open interest required
-  maxSpread         Float    @default(0.10)     // Max bid-ask spread allowed
-  allowedCategories String[] @default([])       // Empty = all allowed
-  tradingEnabled    Boolean  @default(false)
-  updatedAt         DateTime @updatedAt
-}
-
-// Audit log for all actions
-model AuditLog {
-  id          String   @id @default(cuid())
-  action      String
-  entityType  String
-  entityId    String
-  details     Json?
-  createdAt   DateTime @default(now())
-}
-
-// API credentials storage (encrypted)
-model ApiCredentials {
-  id            String   @id @default(cuid())
-  platform      String   @default("kalshi")
-  email         String?
-  apiKeyId      String?
-  encryptedKey  String?  // Encrypted API private key
-  environment   String   @default("demo") // demo, production
-  isActive      Boolean  @default(false)
-  lastUsed      DateTime?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-}
-
-// Cached trend data for market discovery
-model TrendCache {
-  id          String   @id @default(cuid())
-  topic       String
-  category    String
-  score       Float
-  sources     Json     // { reddit: [], news: [] }
-  keywords    String[]
-  sentiment   String?
-  createdAt   DateTime @default(now())
-  expiresAt   DateTime
-
-  @@index([category])
-  @@index([expiresAt])
-}
-
-// Reddit post cache
-model RedditPostCache {
-  id          String   @id
-  subreddit   String
-  title       String
-  selftext    String?
-  score       Int
-  numComments Int
-  url         String
-  author      String
-  postedAt    DateTime
-  fetchedAt   DateTime @default(now())
-
-  @@index([subreddit])
-  @@index([fetchedAt])
-}
-
-// News article cache  
-model NewsCache {
-  id          String   @id @default(cuid())
-  title       String
-  description String?
-  url         String   @unique
-  source      String
-  category    String?
-  publishedAt DateTime
-  fetchedAt   DateTime @default(now())
-
-  @@index([category])
-  @@index([fetchedAt])
-}
-
-// ============================================
-// RESEARCH, STRATEGY & ANALYSIS MODELS
-// ============================================
-
-// Betting Strategy
-model Strategy {
-  id              String   @id @default(cuid())
-  name            String
-  description     String?
-  type            String   @default("value") // value, arbitrage, hedge, momentum
-  parameters      Json     // Kelly fraction, confidence threshold, etc.
-  categories      String[] @default([])  // Politics, Economics, Sports, etc.
-  maxBetSize      Int      @default(100)
-  dailyLimit      Float    @default(500)
-  isActive        Boolean  @default(false)
-  backtestResults Json?    // { roi: %, winRate: %, brier: n }
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-}
-
-// Trade Journal for reflection
-model TradeJournal {
-  id            String   @id @default(cuid())
-  marketTicker  String
-  marketTitle   String
-  side          String   // yes, no
-  contracts     Int
-  entryPrice    Float
-  exitPrice     Float?
-  outcome       String?  // win, loss, pending
-  pnl           Float?
-  thesis        String?  // Why you took this trade
-  lessonsLearned String?
-  confidence    Int?     // 1-10
-  tags          String[] @default([])
-  createdAt     DateTime @default(now())
-  closedAt      DateTime?
-
-  @@index([outcome])
-  @@index([marketTicker])
-}
-
-// Analysis Snapshot (daily portfolio metrics)
-model AnalysisSnapshot {
-  id              String   @id @default(cuid())
-  date            DateTime @unique
-  totalExposure   Float    // Total $ at risk
-  realizedPnl     Float
-  unrealizedPnl   Float
-  winRate         Float?
-  roi             Float?
-  brierScore      Float?   // Prediction accuracy
-  tradesCount     Int      @default(0)
-  winningTrades   Int      @default(0)
-  losingTrades    Int      @default(0)
-  byCategory      Json?    // { "Politics": { pnl: x, trades: y }, ... }
-  createdAt       DateTime @default(now())
-}
-
-// Event Calendar Entry
-model CalendarEvent {
-  id            String   @id @default(cuid())
-  title         String
-  description   String?
-  eventDate     DateTime
-  category      String
-  importance    Int      @default(3) // 1-5
-  relatedMarkets String[] @default([])
-  createdAt     DateTime @default(now())
-
-  @@index([eventDate])
-  @@index([category])
-}
-
-// ============================================
-// ORDER MANAGEMENT SYSTEM (OMS)
-// ============================================
-
-// OMS Order - Enhanced order with state machine
-model OmsOrder {
-  id              String    @id @default(cuid())
-  clientOrderId   String    @unique // For idempotent order placement
-  kalshiOrderId   String?   @unique // External Kalshi order ID
-  marketId        String    // Market ticker
-  action          String    // buy, sell
-  side            String    // yes, no
-  type            String    @default("limit") // market, limit
-  contracts       Int       // Total contracts requested
-  limitPrice      Int?      // Limit price in cents (1-99)
-  filledContracts Int       @default(0)
-  avgFillPrice    Float?    // Average fill price in cents
-  state           String    @default("DRAFT") // DRAFT, PENDING, SUBMITTED, ACCEPTED, PARTIAL_FILL, FILLED, CANCELED, REJECTED, EXPIRED
-  rejectReason    String?   // Reason for rejection
-  expiresAt       DateTime? // Order expiration time
+  settlementTime  DateTime?
+  
+  // Position cap configuration
+  maxPositionSize Decimal   @default(1000) @db.Decimal(18, 8)  // Max contracts
+  maxNotional     Decimal   @default(10000) @db.Decimal(18, 8) // Max $ exposure
+  
+  // Current aggregated position
+  currentPosition Decimal   @default(0) @db.Decimal(18, 8)
+  
+  // Risk classification
+  riskTier        Int       @default(1)  // 1=low, 2=medium, 3=high
+  
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
   
-  transitions     OmsStateTransition[]
-  fills           OmsFill[]
+  // Relations
+  orders          Order[]
+  positions       Position[]
+  positionCaps    PositionCap[]
+  
+  @@index([externalId])
+  @@index([status])
+  @@map("markets")
+}
 
-  @@index([state])
+model PositionCap {
+  id              String   @id @default(cuid())
+  
+  // Can be market-specific or global
+  marketId        String?
+  market          Market?  @relation(fields: [marketId], references: [id])
+  
+  // Cap type
+  capType         String   // "absolute", "percentage", "notional"
+  
+  // Thresholds
+  softLimit       Decimal  @db.Decimal(18, 8)  // Warning threshold
+  hardLimit       Decimal  @db.Decimal(18, 8)  // Cannot exceed
+  
+  // Current usage
+  currentValue    Decimal  @default(0) @db.Decimal(18, 8)
+  
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  @@unique([marketId, capType])
+  @@map("position_caps")
+}
+
+model Position {
+  id              String   @id @default(cuid())
+  marketId        String
+  market          Market   @relation(fields: [marketId], references: [id])
+  
+  side            String   // "yes" or "no"
+  quantity        Decimal  @db.Decimal(18, 8)
+  avgPrice        Decimal  @db.Decimal(18, 8)
+  
+  // P&L tracking
+  realizedPnl     Decimal  @default(0) @db.Decimal(18, 8)
+  unrealizedPnl   Decimal  @default(0) @db.Decimal(18, 8)
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  @@unique([marketId, side])
   @@index([marketId])
+  @@map("positions")
+}
+
+// ============================================
+// TIER 1: ORDER LIFECYCLE STATE MACHINE (#15)
+// ============================================
+
+enum OrderStatus {
+  // Initial states
+  PENDING_VALIDATION    // Created, awaiting validation
+  PENDING_RISK_CHECK    // Passed validation, checking risk
+  PENDING_SUBMISSION    // Passed risk, ready to submit
+  
+  // Active states
+  SUBMITTED             // Sent to exchange
+  ACKNOWLEDGED          // Exchange confirmed receipt
+  PARTIALLY_FILLED      // Some quantity filled
+  
+  // Terminal states
+  FILLED                // Fully executed
+  CANCELLED             // Cancelled by user
+  REJECTED              // Rejected by exchange
+  EXPIRED               // Time-in-force expired
+  FAILED                // System error
+}
+
+enum OrderSide {
+  YES
+  NO
+}
+
+enum OrderType {
+  MARKET
+  LIMIT
+}
+
+enum TimeInForce {
+  GTC   // Good til cancelled
+  IOC   // Immediate or cancel
+  FOK   // Fill or kill
+  GTD   // Good til date
+}
+
+model Order {
+  id                String       @id @default(cuid())
+  
+  // IDEMPOTENCY KEY - Critical for #14
+  idempotencyKey    String       @unique
+  
+  // External references
+  externalOrderId   String?      @unique  // Kalshi order ID
+  marketId          String
+  market            Market       @relation(fields: [marketId], references: [id])
+  
+  // Order details
+  side              OrderSide
+  type              OrderType
+  timeInForce       TimeInForce  @default(GTC)
+  
+  // Quantities and prices
+  requestedQty      Decimal      @db.Decimal(18, 8)
+  filledQty         Decimal      @default(0) @db.Decimal(18, 8)
+  remainingQty      Decimal      @db.Decimal(18, 8)
+  limitPrice        Decimal?     @db.Decimal(18, 8)
+  avgFillPrice      Decimal?     @db.Decimal(18, 8)
+  
+  // State machine
+  status            OrderStatus  @default(PENDING_VALIDATION)
+  
+  // Timestamps for each state transition
+  validatedAt       DateTime?
+  riskCheckedAt     DateTime?
+  submittedAt       DateTime?
+  acknowledgedAt    DateTime?
+  filledAt          DateTime?
+  cancelledAt       DateTime?
+  rejectedAt        DateTime?
+  expiredAt         DateTime?
+  failedAt          DateTime?
+  
+  // Error tracking
+  errorCode         String?
+  errorMessage      String?
+  retryCount        Int          @default(0)
+  
+  // Strategy attribution
+  strategyId        String?
+  signalId          String?
+  
+  // Audit
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+  
+  // Relations
+  stateTransitions  OrderStateTransition[]
+  fills             OrderFill[]
+  
+  @@index([marketId])
+  @@index([status])
+  @@index([idempotencyKey])
+  @@index([externalOrderId])
   @@index([createdAt])
+  @@map("orders")
 }
 
-// OMS State Transition - Audit log for state changes
-model OmsStateTransition {
-  id          String   @id @default(cuid())
+// Full audit trail of state transitions
+model OrderStateTransition {
+  id          String      @id @default(cuid())
   orderId     String
-  order       OmsOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  fromState   String?  // Null for initial state
-  toState     String
+  order       Order       @relation(fields: [orderId], references: [id])
+  
+  fromStatus  OrderStatus?
+  toStatus    OrderStatus
+  
   reason      String?
-  metadata    Json?    // Additional context for the transition
-  timestamp   DateTime @default(now())
-
+  metadata    Json?       // Additional context
+  
+  createdAt   DateTime    @default(now())
+  
   @@index([orderId])
-  @@index([timestamp])
+  @@index([createdAt])
+  @@map("order_state_transitions")
 }
 
-// OMS Fill - Records of order fills
-model OmsFill {
+// Individual fills for an order
+model OrderFill {
   id            String   @id @default(cuid())
   orderId       String
-  order         OmsOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  contracts     Int      // Number of contracts filled
-  price         Float    // Fill price in cents
-  kalshiFillId  String?  // External Kalshi fill ID
-  timestamp     DateTime @default(now())
-
+  order         Order    @relation(fields: [orderId], references: [id])
+  
+  externalId    String?  // Exchange fill ID
+  quantity      Decimal  @db.Decimal(18, 8)
+  price         Decimal  @db.Decimal(18, 8)
+  fee           Decimal  @default(0) @db.Decimal(18, 8)
+  
+  filledAt      DateTime @default(now())
+  
   @@index([orderId])
-  @@index([timestamp])
+  @@map("order_fills")
+}
+
+// ============================================
+// TIER 1: IDEMPOTENT ORDER PLACEMENT (#14)
+// ============================================
+
+model IdempotencyRecord {
+  id              String   @id @default(cuid())
+  key             String   @unique
+  
+  // Request fingerprint
+  requestHash     String   // Hash of the request payload
+  
+  // Response cache
+  responseStatus  Int      // HTTP status
+  responseBody    Json?    // Cached response
+  
+  // Tracking
+  orderId         String?  // Resulting order ID if successful
+  
+  // Expiry
+  expiresAt       DateTime
+  createdAt       DateTime @default(now())
+  
+  @@index([key])
+  @@index([expiresAt])
+  @@map("idempotency_records")
+}
+
+// ============================================
+// AUDIT & MONITORING
+// ============================================
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  
+  action      String   // "order.created", "killswitch.triggered", etc.
+  entityType  String   // "order", "killswitch", etc.
+  entityId    String
+  
+  actor       String   // "system", user ID, or strategy ID
+  metadata    Json?
+  
+  createdAt   DateTime @default(now())
+  
+  @@index([entityType, entityId])
+  @@index([action])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+model SystemMetric {
+  id          String   @id @default(cuid())
+  
+  name        String   // "order_latency", "error_rate", etc.
+  value       Decimal  @db.Decimal(18, 8)
+  tags        Json?    // {"market": "BTC", "strategy": "momentum"}
+  
+  recordedAt  DateTime @default(now())
+  
+  @@index([name, recordedAt])
+  @@map("system_metrics")
+}
+
+// ============================================
+// ARBITRAGE DETECTION SYSTEM
+// ============================================
+
+enum ArbitrageType {
+  SINGLE_MARKET    // YES + NO != $1.00
+  CROSS_MARKET     // Related markets with pricing inconsistency
+  TEMPORAL         // Same event, different timeframes
+}
+
+enum ArbitrageStatus {
+  ACTIVE           // Opportunity still exists
+  EXECUTED         // We executed the trade
+  EXPIRED          // No longer profitable
+  MISSED           // Disappeared before we could act
+}
+
+model ArbitrageOpportunity {
+  id              String          @id @default(cuid())
+  
+  type            ArbitrageType
+  status          ArbitrageStatus @default(ACTIVE)
+  
+  // Primary market info
+  marketTicker    String
+  marketTitle     String
+  
+  // For cross-market arbitrage
+  relatedMarketTicker String?
+  relatedMarketTitle  String?
+  
+  // Price data at detection time
+  yesBid          Decimal         @db.Decimal(10, 4)  // Best YES bid
+  yesAsk          Decimal         @db.Decimal(10, 4)  // Best YES ask
+  noBid           Decimal         @db.Decimal(10, 4)  // Best NO bid
+  noAsk           Decimal         @db.Decimal(10, 4)  // Best NO ask
+  
+  // Calculated values (in cents)
+  totalCost       Decimal         @db.Decimal(10, 4)  // Cost to buy both sides
+  guaranteedPayout Decimal        @db.Decimal(10, 4)  // Always $1.00 for single market
+  profitCents     Decimal         @db.Decimal(10, 4)  // Profit per contract
+  profitPercent   Decimal         @db.Decimal(10, 6)  // ROI percentage
+  
+  // Volume/liquidity info
+  maxContracts    Int?            // How many contracts available at these prices
+  estimatedMaxProfit Decimal?     @db.Decimal(18, 4)  // profitCents * maxContracts
+  
+  // Execution tracking
+  executedAt      DateTime?
+  executedContracts Int?
+  actualProfit    Decimal?        @db.Decimal(18, 4)
+  
+  // Alert tracking
+  alertSent       Boolean         @default(false)
+  alertSentAt     DateTime?
+  
+  // Timestamps
+  detectedAt      DateTime        @default(now())
+  lastSeenAt      DateTime        @default(now())
+  expiredAt       DateTime?
+  
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  
+  @@index([type, status])
+  @@index([profitCents])
+  @@index([detectedAt])
+  @@index([marketTicker])
+  @@map("arbitrage_opportunities")
+}
+
+// Track scan history for analytics
+model ArbitrageScan {
+  id              String   @id @default(cuid())
+  
+  marketsScanned  Int
+  opportunitiesFound Int
+  totalProfitPotential Decimal @db.Decimal(18, 4)
+  
+  scanDurationMs  Int
+  
+  startedAt       DateTime @default(now())
+  completedAt     DateTime @default(now())
+  
+  @@index([startedAt])
+  @@map("arbitrage_scans")
+}
+
+// Alert configuration
+model ArbitrageAlertConfig {
+  id              String   @id @default(cuid())
+  
+  // Alert thresholds
+  minProfitCents  Decimal  @default(1) @db.Decimal(10, 4)  // Min profit to alert
+  minProfitPercent Decimal @default(0.5) @db.Decimal(10, 6)  // Min ROI % to alert
+  
+  // Notification settings
+  alertEnabled    Boolean  @default(true)
+  webhookUrl      String?
+  
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  @@map("arbitrage_alert_configs")
 }

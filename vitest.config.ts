@@ -5,12 +5,17 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'node',
-    include: ['__tests__/**/*.test.ts'],
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'html'],
-      include: ['src/lib/oms/**/*.ts'],
+      exclude: [
+        'node_modules/',
+        '**/*.d.ts',
+        '**/*.config.*',
+        '**/index.ts',
+      ],
     },
+    include: ['src/**/*.test.ts', 'src/**/*.spec.ts'],
   },
   resolve: {
     alias: {

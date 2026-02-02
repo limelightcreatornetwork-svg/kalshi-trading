@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import Link from "next/link";
 import "./globals.css";
-import Navigation from "@/components/Navigation";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -14,9 +14,37 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Kalshi Trading",
-  description: "US-regulated prediction market trading with research and analysis tools",
+  title: "Kalshi Trading Platform",
+  description: "Trading tools for Kalshi prediction markets",
 };
+
+function Navigation() {
+  return (
+    <nav className="bg-zinc-900 border-b border-zinc-800 sticky top-0 z-50">
+      <div className="max-w-7xl mx-auto px-4">
+        <div className="flex items-center justify-between h-14">
+          <Link href="/" className="font-bold text-white text-lg hover:text-green-400 transition-colors">
+            📈 Kalshi Trading
+          </Link>
+          <div className="flex items-center gap-6">
+            <Link
+              href="/arbitrage"
+              className="text-zinc-400 hover:text-white transition-colors text-sm font-medium"
+            >
+              🎯 Arbitrage Scanner
+            </Link>
+            <Link
+              href="/api/markets"
+              className="text-zinc-400 hover:text-white transition-colors text-sm font-medium"
+            >
+              📊 Markets API
+            </Link>
+          </div>
+        </div>
+      </div>
+    </nav>
+  );
+}
 
 export default function RootLayout({
   children,
@@ -24,14 +52,12 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
+    <html lang="en" className="dark">
       <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased bg-gray-950 text-white min-h-screen`}
+        className={`${geistSans.variable} ${geistMono.variable} antialiased bg-zinc-950 text-white`}
       >
         <Navigation />
-        <main className="max-w-7xl mx-auto px-4 py-6">
-          {children}
-        </main>
+        {children}
       </body>
     </html>
   );

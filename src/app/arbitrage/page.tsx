@@ -1,410 +1,394 @@
-"use client";
+'use client';
 
-import { useState, useEffect, useCallback } from "react";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
+import { useState, useEffect, useCallback } from 'react';
+import type { ArbitrageOpportunity, MarketWithArbitrage, ArbitrageScanResult } from '@/types/arbitrage';
 
-interface ExecutionStep {
-  order: number;
-  action: 'buy' | 'sell';
-  side: 'yes' | 'no';
-  ticker: string;
-  price: number;
-  description: string;
-}
-
-interface ArbitrageOpportunity {
-  id: string;
-  type: 'single_market' | 'cross_market';
-  markets: Array<{
-    ticker: string;
-    title: string;
-    yes_ask: number;
-    yes_bid: number;
-    no_ask: number;
-    no_bid: number;
-  }>;
-  spread: number;
-  profitPotential: number;
-  direction: 'buy_both' | 'sell_both' | 'complex';
-  confidence: 'high' | 'medium' | 'low';
-  description: string;
-  executionSteps: ExecutionStep[];
-  detectedAt: string;
-  expiresAt?: string;
-}
-
-interface ScanResult {
-  opportunities: ArbitrageOpportunity[];
-  marketsScanned: number;
-  scanDuration: number;
-  timestamp: string;
-  demo: boolean;
+interface ScanStats {
+  totalScans: number;
+  totalOpportunities: number;
+  avgProfitCents: number;
+  totalProfitPotential: number;
+  executedCount: number;
+  totalActualProfit: number;
 }
 
 export default function ArbitragePage() {
-  const [data, setData] = useState<ScanResult | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [autoRefresh, setAutoRefresh] = useState(false);
-  const [contracts, setContracts] = useState<number>(10);
+  const [opportunities, setOpportunities] = useState<ArbitrageOpportunity[]>([]);
+  const [allMarkets, setAllMarkets] = useState<MarketWithArbitrage[]>([]);
+  const [stats, setStats] = useState<ScanStats | null>(null);
+  const [scanning, setScanning] = useState(false);
   const [executing, setExecuting] = useState<string | null>(null);
-  const [lastScan, setLastScan] = useState<Date | null>(null);
+  const [lastScan, setLastScan] = useState<ArbitrageScanResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [showAllMarkets, setShowAllMarkets] = useState(false);
+  const [contractsToExecute, setContractsToExecute] = useState<Record<string, number>>({});
 
-  const fetchArbitrage = useCallback(async () => {
+  // Fetch current opportunities on mount
+  const fetchOpportunities = useCallback(async () => {
     try {
-      setLoading(true);
-      setError(null);
-      // Use the new endpoint with configurable params
-      const params = new URLSearchParams({
-        minProfit: '5', // $0.05 minimum after fees
-        minVolume: '1000', // Require liquidity
-        contracts: contracts.toString(),
-        maxBudget: '5000', // $50 max per trade
-      });
-      const response = await fetch(`/api/kalshi/arbitrage?${params}`);
-      if (!response.ok) throw new Error('Failed to fetch');
-      const result = await response.json();
-      // Map to expected format
-      setData({
-        opportunities: result.opportunities || [],
-        marketsScanned: result.summary?.marketsScanned || 0,
-        scanDuration: result.summary?.scanDuration || 0,
-        timestamp: result.timestamp || new Date().toISOString(),
-        demo: result.demo,
-      });
-      setLastScan(new Date());
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unknown error');
-    } finally {
-      setLoading(false);
-    }
-  }, [contracts]);
-
-  useEffect(() => {
-    fetchArbitrage();
-  }, [fetchArbitrage]);
-
-  useEffect(() => {
-    if (!autoRefresh) return;
-    const interval = setInterval(fetchArbitrage, 10000); // 10 second polling
-    return () => clearInterval(interval);
-  }, [autoRefresh, fetchArbitrage]);
-
-  const executeArbitrage = async (opportunity: ArbitrageOpportunity) => {
-    // Confirm before executing
-    const profit = calculateProfit(opportunity);
-    const confirmed = window.confirm(
-      `Execute arbitrage trade?\n\n` +
-      `Market: ${opportunity.markets[0]?.title || opportunity.markets[0]?.ticker}\n` +
-      `Contracts: ${contracts}\n` +
-      `Expected Net Profit: $${profit.net}\n` +
-      `ROI: ${profit.roi || 'N/A'}\n\n` +
-      `${!kalshiClient ? '⚠️ Demo mode - no real orders' : '💰 LIVE - Real money!'}`
-    );
-    
-    if (!confirmed) return;
-    
-    setExecuting(opportunity.id);
-    try {
-      const response = await fetch('/api/kalshi/execute', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          opportunityId: opportunity.id,
-          contracts,
-          steps: opportunity.executionSteps,
-        }),
-      });
-      const result = await response.json();
-      if (result.ok) {
-        const summary = result.summary;
-        alert(
-          `✅ Arbitrage executed! ${result.demo ? '(Demo mode)' : ''}\n\n` +
-          `Completed: ${summary.completedSteps}/${summary.totalSteps} orders\n` +
-          `Total Cost: $${(summary.totalCostCents / 100).toFixed(2)}\n` +
-          `Expected Profit: $${(summary.expectedProfitCents / 100).toFixed(2)}`
-        );
+      const res = await fetch('/api/arbitrage/scan');
+      const data = await res.json();
+      
+      if (data.success) {
+        setOpportunities(data.data.opportunities || []);
+        setStats(data.data.stats || null);
       } else {
-        alert(`❌ Execution failed: ${result.error}`);
+        setError(data.error);
       }
     } catch (err) {
-      alert(`Error: ${err instanceof Error ? err.message : 'Unknown error'}`);
+      setError(err instanceof Error ? err.message : 'Failed to fetch opportunities');
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchOpportunities();
+  }, [fetchOpportunities]);
+
+  // Run a new scan
+  const runScan = async () => {
+    setScanning(true);
+    setError(null);
+    
+    try {
+      const res = await fetch('/api/arbitrage/scan', { method: 'POST' });
+      const data = await res.json();
+      
+      if (data.success) {
+        setLastScan(data.data);
+        setOpportunities(data.data.opportunities || []);
+        setAllMarkets(data.data.allMarkets || []);
+        // Refresh stats
+        await fetchOpportunities();
+      } else {
+        setError(data.error);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Scan failed');
+    } finally {
+      setScanning(false);
+    }
+  };
+
+  // Execute an opportunity
+  const executeOpportunity = async (opportunityId: string) => {
+    const contracts = contractsToExecute[opportunityId] || 1;
+    setExecuting(opportunityId);
+    setError(null);
+    
+    try {
+      const res = await fetch('/api/arbitrage/execute', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ opportunityId, contracts }),
+      });
+      const data = await res.json();
+      
+      if (data.success) {
+        // Refresh opportunities
+        await fetchOpportunities();
+        alert(`Executed! Expected profit: $${(data.data.expectedProfit / 100).toFixed(2)}`);
+      } else {
+        setError(data.error);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Execution failed');
     } finally {
       setExecuting(null);
-      fetchArbitrage();
-    }
-  };
-  
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const kalshiClient = (typeof window !== 'undefined') ? null : null; // Client-side check
-
-  const confidenceColor = (conf: string) => {
-    switch (conf) {
-      case 'high': return 'bg-green-600';
-      case 'medium': return 'bg-yellow-600';
-      case 'low': return 'bg-orange-600';
-      default: return 'bg-gray-600';
     }
   };
 
-  const typeColor = (type: string) => {
-    return type === 'single_market' ? 'bg-blue-600' : 'bg-purple-600';
-  };
-
-  const calculateProfit = (opp: ArbitrageOpportunity & { calculation?: { netProfitCents: number; feesCents: number; grossProfitCents: number; roi: string } }) => {
-    // Use pre-calculated values if available from API
-    if (opp.calculation) {
-      return {
-        gross: (opp.calculation.grossProfitCents / 100).toFixed(2),
-        fees: (opp.calculation.feesCents / 100).toFixed(2),
-        net: (opp.calculation.netProfitCents / 100).toFixed(2),
-        roi: opp.calculation.roi,
-      };
-    }
-    // Fallback calculation (Kalshi ~1.5¢ per side)
-    const gross = opp.profitPotential * contracts;
-    const feePerSide = 1.5; // cents
-    const fees = feePerSide * opp.executionSteps.length * contracts;
-    const net = gross - fees;
-    const totalCost = opp.executionSteps.reduce((sum, s) => sum + s.price * contracts, 0);
-    return {
-      gross: (gross / 100).toFixed(2),
-      fees: (fees / 100).toFixed(2),
-      net: (net / 100).toFixed(2),
-      roi: totalCost > 0 ? ((net / totalCost) * 100).toFixed(2) + '%' : '0%',
-    };
-  };
+  const formatCents = (cents: number) => `$${(cents / 100).toFixed(4)}`;
+  const formatPercent = (pct: number) => `${pct.toFixed(2)}%`;
 
   return (
-    <main className="min-h-screen bg-gradient-to-b from-gray-900 to-black text-white p-6">
-      <div className="max-w-7xl mx-auto space-y-6">
+    <div className="min-h-screen bg-zinc-950 text-white p-8">
+      <div className="max-w-7xl mx-auto">
         {/* Header */}
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between mb-8">
           <div>
-            <h1 className="text-3xl font-bold flex items-center gap-3">
-              ⚡ Arbitrage Scanner
-            </h1>
-            <p className="text-gray-400 mt-1">
-              Detect mispricing opportunities in Kalshi markets
+            <h1 className="text-3xl font-bold text-white">Arbitrage Scanner</h1>
+            <p className="text-zinc-400 mt-1">
+              Detect pricing inefficiencies in Kalshi markets
             </p>
           </div>
-          <div className="flex items-center gap-4">
-            <div className="text-sm text-gray-400">
-              {lastScan && `Last scan: ${lastScan.toLocaleTimeString()}`}
-            </div>
-            <Button
-              onClick={() => setAutoRefresh(!autoRefresh)}
-              variant={autoRefresh ? "default" : "outline"}
-              className={autoRefresh ? "bg-green-600 hover:bg-green-700" : ""}
-            >
-              {autoRefresh ? "🔄 Auto-Refresh ON" : "Auto-Refresh OFF"}
-            </Button>
-            <Button onClick={fetchArbitrage} disabled={loading}>
-              {loading ? "Scanning..." : "🔍 Scan Now"}
-            </Button>
-          </div>
+          <button
+            onClick={runScan}
+            disabled={scanning}
+            className={`px-6 py-3 rounded-lg font-medium transition-all ${
+              scanning
+                ? 'bg-zinc-700 text-zinc-400 cursor-not-allowed'
+                : 'bg-green-600 hover:bg-green-500 text-white'
+            }`}
+          >
+            {scanning ? (
+              <span className="flex items-center gap-2">
+                <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                </svg>
+                Scanning...
+              </span>
+            ) : (
+              '🔍 Scan Markets'
+            )}
+          </button>
         </div>
 
-        {/* Stats Bar */}
-        {data && (
-          <div className="grid grid-cols-4 gap-4">
-            <Card className="bg-gray-800 border-gray-700">
-              <CardContent className="p-4">
-                <div className="text-2xl font-bold text-white">{data.opportunities.length}</div>
-                <div className="text-sm text-gray-400">Opportunities Found</div>
-              </CardContent>
-            </Card>
-            <Card className="bg-gray-800 border-gray-700">
-              <CardContent className="p-4">
-                <div className="text-2xl font-bold text-white">{data.marketsScanned}</div>
-                <div className="text-sm text-gray-400">Markets Scanned</div>
-              </CardContent>
-            </Card>
-            <Card className="bg-gray-800 border-gray-700">
-              <CardContent className="p-4">
-                <div className="text-2xl font-bold text-white">{data.scanDuration}ms</div>
-                <div className="text-sm text-gray-400">Scan Duration</div>
-              </CardContent>
-            </Card>
-            <Card className="bg-gray-800 border-gray-700">
-              <CardContent className="p-4">
-                <div className="text-2xl font-bold text-yellow-500">{data.demo ? 'Demo' : 'Live'}</div>
-                <div className="text-sm text-gray-400">Mode</div>
-              </CardContent>
-            </Card>
+        {/* Error display */}
+        {error && (
+          <div className="mb-6 p-4 bg-red-900/50 border border-red-500 rounded-lg text-red-200">
+            ⚠️ {error}
           </div>
         )}
 
-        {/* Profit Calculator */}
-        <Card className="bg-gray-800 border-gray-700">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-lg">💰 Profit Calculator</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="flex items-center gap-4">
-              <label className="text-sm text-gray-400">Contracts per opportunity:</label>
-              <input
-                type="number"
-                min="1"
-                max="10000"
-                value={contracts}
-                onChange={(e) => setContracts(Math.max(1, parseInt(e.target.value) || 1))}
-                className="w-24 px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white"
-              />
-              <span className="text-sm text-gray-500">
-                Each contract = $1.00 max payout
-              </span>
+        {/* Stats Cards */}
+        {stats && (
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+            <div className="bg-zinc-900 rounded-lg p-4 border border-zinc-800">
+              <div className="text-zinc-400 text-sm">Total Scans</div>
+              <div className="text-2xl font-bold text-white">{stats.totalScans}</div>
             </div>
-          </CardContent>
-        </Card>
-
-        {/* Error Display */}
-        {error && (
-          <Card className="bg-red-900/30 border-red-700">
-            <CardContent className="p-4">
-              <p className="text-red-300">⚠️ Error: {error}</p>
-            </CardContent>
-          </Card>
+            <div className="bg-zinc-900 rounded-lg p-4 border border-zinc-800">
+              <div className="text-zinc-400 text-sm">Opportunities Found</div>
+              <div className="text-2xl font-bold text-green-400">{stats.totalOpportunities}</div>
+            </div>
+            <div className="bg-zinc-900 rounded-lg p-4 border border-zinc-800">
+              <div className="text-zinc-400 text-sm">Avg Profit/Contract</div>
+              <div className="text-2xl font-bold text-yellow-400">{formatCents(stats.avgProfitCents)}</div>
+            </div>
+            <div className="bg-zinc-900 rounded-lg p-4 border border-zinc-800">
+              <div className="text-zinc-400 text-sm">Total Executed</div>
+              <div className="text-2xl font-bold text-blue-400">{stats.executedCount}</div>
+            </div>
+          </div>
         )}
 
-        {/* Opportunities List */}
-        <div className="space-y-4">
-          <h2 className="text-xl font-semibold">
-            {data?.opportunities.length ? '🎯 Active Opportunities' : '⏳ No Opportunities Found'}
+        {/* Last Scan Results */}
+        {lastScan && (
+          <div className="mb-8 p-4 bg-zinc-900 rounded-lg border border-zinc-800">
+            <h3 className="text-lg font-semibold mb-2">Latest Scan Results</h3>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+              <div>
+                <span className="text-zinc-400">Markets Scanned:</span>{' '}
+                <span className="text-white font-medium">{lastScan.marketsScanned}</span>
+              </div>
+              <div>
+                <span className="text-zinc-400">Opportunities:</span>{' '}
+                <span className="text-green-400 font-medium">{lastScan.opportunitiesFound}</span>
+              </div>
+              <div>
+                <span className="text-zinc-400">Total Profit Potential:</span>{' '}
+                <span className="text-yellow-400 font-medium">{formatCents(lastScan.totalProfitPotential)}</span>
+              </div>
+              <div>
+                <span className="text-zinc-400">Scan Time:</span>{' '}
+                <span className="text-white font-medium">{lastScan.scanDurationMs}ms</span>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Active Opportunities */}
+        <div className="mb-8">
+          <h2 className="text-xl font-semibold mb-4 flex items-center gap-2">
+            🎯 Active Arbitrage Opportunities
+            {opportunities.length > 0 && (
+              <span className="bg-green-600 text-white text-sm px-2 py-1 rounded">
+                {opportunities.length} found
+              </span>
+            )}
           </h2>
 
-          {data?.opportunities.length === 0 && !loading && (
-            <Card className="bg-gray-800 border-gray-700">
-              <CardContent className="p-8 text-center">
-                <div className="text-4xl mb-4">🔍</div>
-                <p className="text-gray-400">
-                  No arbitrage opportunities detected right now.
-                  <br />
-                  Markets are efficiently priced or using demo data.
-                </p>
-                <p className="text-sm text-gray-500 mt-4">
-                  Tip: Enable auto-refresh to catch opportunities as they appear.
-                </p>
-              </CardContent>
-            </Card>
-          )}
-
-          {data?.opportunities.map((opp) => {
-            const profit = calculateProfit(opp);
-            return (
-              <Card key={opp.id} className="bg-gray-800 border-gray-700 hover:border-gray-600 transition-colors">
-                <CardHeader className="pb-2">
+          {opportunities.length === 0 ? (
+            <div className="bg-zinc-900 rounded-lg p-8 text-center border border-zinc-800">
+              <div className="text-zinc-400 text-lg">No arbitrage opportunities detected</div>
+              <div className="text-zinc-500 text-sm mt-2">
+                Run a scan to check for pricing inefficiencies
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {opportunities.map((opp) => (
+                <div
+                  key={opp.id}
+                  className="bg-zinc-900 rounded-lg p-6 border border-zinc-800 hover:border-green-500/50 transition-colors"
+                >
                   <div className="flex items-start justify-between">
-                    <div className="space-y-2">
-                      <div className="flex items-center gap-2">
-                        <Badge className={typeColor(opp.type)}>
-                          {opp.type === 'single_market' ? '📊 Single Market' : '🔗 Cross Market'}
-                        </Badge>
-                        <Badge className={confidenceColor(opp.confidence)}>
-                          {opp.confidence.toUpperCase()} Confidence
-                        </Badge>
-                        <Badge variant="outline" className="text-green-400 border-green-600">
-                          +{opp.profitPotential}¢ per contract
-                        </Badge>
+                    <div className="flex-1">
+                      <div className="flex items-center gap-3 mb-2">
+                        <span className="px-2 py-1 bg-green-600/20 text-green-400 text-xs rounded uppercase">
+                          {opp.type.replace('_', ' ')}
+                        </span>
+                        <span className="text-zinc-500 text-sm">{opp.marketTicker}</span>
                       </div>
-                      <CardTitle className="text-lg">
-                        {opp.markets[0]?.title || opp.markets[0]?.ticker}
-                      </CardTitle>
-                      <CardDescription className="text-gray-400">
-                        {opp.description}
-                      </CardDescription>
-                    </div>
-                    <div className="text-right">
-                      <div className="text-2xl font-bold text-green-400">
-                        ${profit.net}
-                      </div>
-                      <div className="text-xs text-gray-500">
-                        net profit ({contracts} contracts)
-                      </div>
-                    </div>
-                  </div>
-                </CardHeader>
-                <CardContent>
-                  {/* Execution Steps */}
-                  <div className="mb-4">
-                    <h4 className="text-sm font-semibold text-gray-300 mb-2">Execution Steps:</h4>
-                    <div className="space-y-1">
-                      {opp.executionSteps.map((step) => (
-                        <div key={step.order} className="flex items-center gap-2 text-sm">
-                          <span className="w-6 h-6 flex items-center justify-center bg-gray-700 rounded-full text-xs">
-                            {step.order}
-                          </span>
-                          <Badge className={step.action === 'buy' ? 'bg-green-700' : 'bg-red-700'}>
-                            {step.action.toUpperCase()}
-                          </Badge>
-                          <span className="text-gray-300">{step.description}</span>
+                      <h3 className="text-lg font-medium text-white mb-3">{opp.marketTitle}</h3>
+                      
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                        <div>
+                          <span className="text-zinc-400">YES Ask:</span>{' '}
+                          <span className="text-white">{formatCents(opp.yesAsk)}</span>
                         </div>
-                      ))}
-                    </div>
-                  </div>
+                        <div>
+                          <span className="text-zinc-400">NO Ask:</span>{' '}
+                          <span className="text-white">{formatCents(opp.noAsk)}</span>
+                        </div>
+                        <div>
+                          <span className="text-zinc-400">Total Cost:</span>{' '}
+                          <span className="text-yellow-400">{formatCents(opp.totalCost)}</span>
+                        </div>
+                        <div>
+                          <span className="text-zinc-400">Guaranteed:</span>{' '}
+                          <span className="text-green-400">$1.00</span>
+                        </div>
+                      </div>
 
-                  {/* Profit Breakdown */}
-                  <div className="grid grid-cols-4 gap-4 mb-4 p-3 bg-gray-700/50 rounded">
-                    <div>
-                      <div className="text-xs text-gray-500">Gross Profit</div>
-                      <div className="text-lg font-semibold text-white">${profit.gross}</div>
+                      <div className="mt-4 flex items-center gap-6">
+                        <div className="bg-green-600/20 px-4 py-2 rounded">
+                          <span className="text-zinc-400 text-sm">Profit/Contract: </span>
+                          <span className="text-green-400 font-bold text-lg">
+                            {formatCents(opp.profitCents)}
+                          </span>
+                        </div>
+                        <div className="bg-blue-600/20 px-4 py-2 rounded">
+                          <span className="text-zinc-400 text-sm">ROI: </span>
+                          <span className="text-blue-400 font-bold text-lg">
+                            {formatPercent(opp.profitPercent)}
+                          </span>
+                        </div>
+                      </div>
                     </div>
-                    <div>
-                      <div className="text-xs text-gray-500">Est. Fees (~2%)</div>
-                      <div className="text-lg font-semibold text-red-400">-${profit.fees}</div>
-                    </div>
-                    <div>
-                      <div className="text-xs text-gray-500">Net Profit</div>
-                      <div className="text-lg font-semibold text-green-400">${profit.net}</div>
-                    </div>
-                    <div>
-                      <div className="text-xs text-gray-500">ROI</div>
-                      <div className="text-lg font-semibold text-blue-400">{profit.roi || 'N/A'}</div>
-                    </div>
-                  </div>
 
-                  {/* Action Button */}
-                  <div className="flex items-center justify-between">
-                    <div className="text-xs text-gray-500">
-                      Detected: {new Date(opp.detectedAt).toLocaleTimeString()}
-                      {opp.expiresAt && ` • Expires: ${new Date(opp.expiresAt).toLocaleDateString()}`}
+                    {/* Execute Controls */}
+                    <div className="ml-6 flex flex-col items-end gap-2">
+                      <div className="flex items-center gap-2">
+                        <label className="text-zinc-400 text-sm">Contracts:</label>
+                        <input
+                          type="number"
+                          min="1"
+                          value={contractsToExecute[opp.id] || 1}
+                          onChange={(e) =>
+                            setContractsToExecute({
+                              ...contractsToExecute,
+                              [opp.id]: parseInt(e.target.value) || 1,
+                            })
+                          }
+                          className="w-20 px-2 py-1 bg-zinc-800 border border-zinc-700 rounded text-white text-center"
+                        />
+                      </div>
+                      <button
+                        onClick={() => executeOpportunity(opp.id)}
+                        disabled={executing === opp.id}
+                        className={`px-4 py-2 rounded font-medium transition-all ${
+                          executing === opp.id
+                            ? 'bg-zinc-700 text-zinc-400 cursor-not-allowed'
+                            : 'bg-green-600 hover:bg-green-500 text-white'
+                        }`}
+                      >
+                        {executing === opp.id ? 'Executing...' : '⚡ Execute'}
+                      </button>
+                      <div className="text-zinc-500 text-xs text-right">
+                        Est. Profit: {formatCents(opp.profitCents * (contractsToExecute[opp.id] || 1))}
+                      </div>
                     </div>
-                    <Button
-                      onClick={() => executeArbitrage(opp)}
-                      disabled={executing === opp.id}
-                      className="bg-green-600 hover:bg-green-700"
-                    >
-                      {executing === opp.id ? "Executing..." : `⚡ Execute (${contracts} contracts)`}
-                    </Button>
                   </div>
-                </CardContent>
-              </Card>
-            );
-          })}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
-        {/* Info Box */}
-        <Card className="bg-blue-900/20 border-blue-700">
-          <CardContent className="p-4">
-            <h3 className="font-semibold text-blue-300 mb-2">ℹ️ How Arbitrage Works</h3>
-            <div className="text-sm text-gray-300 space-y-2">
-              <p>
-                <strong>Single Market Mispricing:</strong> In a perfect market, YES + NO prices should equal $1.00.
-                If you can buy both for less than $1.00, you profit the difference (one side always wins).
-              </p>
-              <p>
-                <strong>Cross Market Arbitrage:</strong> For mutually exclusive events (only one can happen),
-                if the sum of all YES prices is less than $1.00, buying all outcomes guarantees profit.
-              </p>
-              <p className="text-yellow-400">
-                ⚠️ Opportunities may disappear quickly. Execute promptly or prices may change.
-              </p>
+        {/* All Markets Analysis (collapsible) */}
+        {allMarkets.length > 0 && (
+          <div>
+            <button
+              onClick={() => setShowAllMarkets(!showAllMarkets)}
+              className="flex items-center gap-2 text-zinc-400 hover:text-white transition-colors mb-4"
+            >
+              <span className="text-lg">{showAllMarkets ? '▼' : '▶'}</span>
+              <span className="text-lg font-medium">
+                All Markets Analysis ({allMarkets.length} markets)
+              </span>
+            </button>
+
+            {showAllMarkets && (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-zinc-900 border-b border-zinc-700">
+                    <tr>
+                      <th className="text-left p-3 text-zinc-400">Market</th>
+                      <th className="text-right p-3 text-zinc-400">YES Ask</th>
+                      <th className="text-right p-3 text-zinc-400">NO Ask</th>
+                      <th className="text-right p-3 text-zinc-400">Total Cost</th>
+                      <th className="text-right p-3 text-zinc-400">Spread</th>
+                      <th className="text-center p-3 text-zinc-400">Arbitrage?</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {allMarkets.map((market) => (
+                      <tr
+                        key={market.ticker}
+                        className={`border-b border-zinc-800 ${
+                          market.hasArbitrage ? 'bg-green-900/20' : ''
+                        }`}
+                      >
+                        <td className="p-3">
+                          <div className="font-medium text-white truncate max-w-xs">
+                            {market.title}
+                          </div>
+                          <div className="text-zinc-500 text-xs">{market.ticker}</div>
+                        </td>
+                        <td className="text-right p-3 text-white">{formatCents(market.yesAsk)}</td>
+                        <td className="text-right p-3 text-white">{formatCents(market.noAsk)}</td>
+                        <td className="text-right p-3 text-yellow-400">{formatCents(market.buyBothCost)}</td>
+                        <td className="text-right p-3">
+                          {market.buyBothCost < 100 ? (
+                            <span className="text-green-400">+{formatCents(100 - market.buyBothCost)}</span>
+                          ) : market.buyBothCost > 100 ? (
+                            <span className="text-red-400">-{formatCents(market.buyBothCost - 100)}</span>
+                          ) : (
+                            <span className="text-zinc-400">$0.00</span>
+                          )}
+                        </td>
+                        <td className="text-center p-3">
+                          {market.hasArbitrage ? (
+                            <span className="text-green-400">✅ Yes</span>
+                          ) : (
+                            <span className="text-zinc-500">—</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Help Section */}
+        <div className="mt-12 p-6 bg-zinc-900 rounded-lg border border-zinc-800">
+          <h3 className="text-lg font-semibold mb-4">📚 How Arbitrage Works</h3>
+          <div className="space-y-4 text-sm text-zinc-300">
+            <p>
+              <strong className="text-white">Single-Market Arbitrage:</strong> In a binary market,
+              YES + NO should always equal $1.00. If the sum of ASK prices is less than $1.00,
+              you can buy both sides and guarantee a profit when the market resolves.
+            </p>
+            <div className="bg-zinc-800 p-4 rounded">
+              <p className="text-green-400 font-medium">Example (Profitable):</p>
+              <p>YES Ask = $0.48, NO Ask = $0.48</p>
+              <p>Total cost = $0.96, Guaranteed payout = $1.00</p>
+              <p className="text-green-400">Profit = $0.04 per contract (4.17% ROI)</p>
             </div>
-          </CardContent>
-        </Card>
+            <div className="bg-zinc-800 p-4 rounded">
+              <p className="text-red-400 font-medium">Example (Loss):</p>
+              <p>YES Ask = $0.52, NO Ask = $0.52</p>
+              <p>Total cost = $1.04, Guaranteed payout = $1.00</p>
+              <p className="text-red-400">Loss = $0.04 per contract (-3.85% ROI)</p>
+            </div>
+          </div>
+        </div>
       </div>
-    </main>
+    </div>
   );
 }

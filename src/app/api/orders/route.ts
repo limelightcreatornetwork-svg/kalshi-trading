@@ -1,111 +1,163 @@
-import { NextResponse } from "next/server";
-import { kalshiClient } from "@/lib/kalshi";
+// GET /api/orders - Get orders
+// POST /api/orders - Create new order
+import { NextRequest, NextResponse } from 'next/server';
+import { getOrders, createOrder, CreateOrderRequest, KalshiApiError } from '@/lib/kalshi';
 
-export async function POST(request: Request) {
+export async function GET(request: NextRequest) {
   try {
-    const body = await request.json();
-    const { ticker, action, side, type, count, limitPrice } = body;
-
-    // Validate required fields
-    if (!ticker || !action || !side || !count) {
-      return NextResponse.json(
-        { ok: false, error: "Missing required fields: ticker, action, side, count" },
-        { status: 400 }
-      );
-    }
-
-    // Validate action
-    if (!['buy', 'sell'].includes(action)) {
-      return NextResponse.json(
-        { ok: false, error: "action must be 'buy' or 'sell'" },
-        { status: 400 }
-      );
-    }
-
-    // Validate side
-    if (!['yes', 'no'].includes(side)) {
-      return NextResponse.json(
-        { ok: false, error: "side must be 'yes' or 'no'" },
-        { status: 400 }
-      );
-    }
-
-    // Validate type
-    const orderType = type || 'market';
-    if (!['market', 'limit'].includes(orderType)) {
-      return NextResponse.json(
-        { ok: false, error: "type must be 'market' or 'limit'" },
-        { status: 400 }
-      );
-    }
-
-    // Limit orders require a price
-    if (orderType === 'limit' && !limitPrice) {
-      return NextResponse.json(
-        { ok: false, error: "Limit orders require a limitPrice" },
-        { status: 400 }
-      );
-    }
-
-    const result = await kalshiClient.createOrder({
-      ticker,
-      action,
-      side,
-      type: orderType,
-      count: parseInt(count),
-      limit_price: limitPrice ? parseInt(limitPrice) : undefined,
-    });
-
-    if (!result.success) {
-      return NextResponse.json(
-        { ok: false, error: result.error },
-        { status: 400 }
-      );
-    }
-
+    const searchParams = request.nextUrl.searchParams;
+    
+    const params = {
+      limit: searchParams.get('limit') ? parseInt(searchParams.get('limit')!) : 50,
+      cursor: searchParams.get('cursor') || undefined,
+      ticker: searchParams.get('ticker') || undefined,
+      status: searchParams.get('status') || undefined,
+    };
+    
+    const response = await getOrders(params);
+    
+    // Transform orders
+    const orders = response.orders.map(order => ({
+      orderId: order.order_id,
+      clientOrderId: order.client_order_id,
+      ticker: order.ticker,
+      side: order.side,
+      action: order.action,
+      type: order.type,
+      status: order.status,
+      yesPrice: order.yes_price,
+      yesPriceDollars: (order.yes_price / 100).toFixed(2),
+      noPrice: order.no_price,
+      noPriceDollars: (order.no_price / 100).toFixed(2),
+      fillCount: order.fill_count,
+      remainingCount: order.remaining_count,
+      initialCount: order.initial_count,
+      takerFees: order.taker_fees,
+      makerFees: order.maker_fees,
+      createdTime: order.created_time,
+      lastUpdateTime: order.last_update_time,
+    }));
+    
     return NextResponse.json({
-      ok: true,
-      order: result.order,
-      mock: result.mock,
+      success: true,
+      data: {
+        orders,
+        cursor: response.cursor,
+        count: orders.length,
+      },
     });
   } catch (error) {
-    console.error("Error creating order:", error);
+    console.error('Orders GET API error:', error);
+    
+    if (error instanceof KalshiApiError) {
+      return NextResponse.json(
+        { success: false, error: error.apiMessage },
+        { status: error.statusCode }
+      );
+    }
+    
     return NextResponse.json(
-      { ok: false, error: "Failed to create order" },
+      { success: false, error: 'Failed to fetch orders' },
       { status: 500 }
     );
   }
 }
 
-export async function DELETE(request: Request) {
-  const { searchParams } = new URL(request.url);
-  const orderId = searchParams.get("id");
-
-  if (!orderId) {
-    return NextResponse.json(
-      { ok: false, error: "Missing order id" },
-      { status: 400 }
-    );
-  }
-
+export async function POST(request: NextRequest) {
   try {
-    const result = await kalshiClient.cancelOrder(orderId);
-
-    if (!result.success) {
+    const body = await request.json();
+    
+    // Validate required fields
+    if (!body.ticker) {
       return NextResponse.json(
-        { ok: false, error: result.error },
+        { success: false, error: 'ticker is required' },
         { status: 400 }
       );
     }
-
+    if (!body.side || !['yes', 'no'].includes(body.side)) {
+      return NextResponse.json(
+        { success: false, error: 'side must be "yes" or "no"' },
+        { status: 400 }
+      );
+    }
+    if (!body.action || !['buy', 'sell'].includes(body.action)) {
+      return NextResponse.json(
+        { success: false, error: 'action must be "buy" or "sell"' },
+        { status: 400 }
+      );
+    }
+    if (!body.count || body.count < 1) {
+      return NextResponse.json(
+        { success: false, error: 'count must be at least 1' },
+        { status: 400 }
+      );
+    }
+    
+    // Build order request
+    const orderRequest: CreateOrderRequest = {
+      ticker: body.ticker,
+      side: body.side,
+      action: body.action,
+      count: body.count,
+      type: body.type || 'limit',
+    };
+    
+    // Add optional price (required for limit orders)
+    if (body.yesPrice !== undefined) {
+      orderRequest.yes_price = body.yesPrice;
+    }
+    if (body.noPrice !== undefined) {
+      orderRequest.no_price = body.noPrice;
+    }
+    
+    // Add other optional fields
+    if (body.clientOrderId) {
+      orderRequest.client_order_id = body.clientOrderId;
+    }
+    if (body.timeInForce) {
+      orderRequest.time_in_force = body.timeInForce;
+    }
+    if (body.expirationTs) {
+      orderRequest.expiration_ts = body.expirationTs;
+    }
+    if (body.postOnly !== undefined) {
+      orderRequest.post_only = body.postOnly;
+    }
+    
+    const response = await createOrder(orderRequest);
+    
+    const order = response.order;
+    
     return NextResponse.json({
-      ok: true,
-      mock: result.mock,
-    });
+      success: true,
+      data: {
+        orderId: order.order_id,
+        clientOrderId: order.client_order_id,
+        ticker: order.ticker,
+        side: order.side,
+        action: order.action,
+        type: order.type,
+        status: order.status,
+        yesPrice: order.yes_price,
+        yesPriceDollars: (order.yes_price / 100).toFixed(2),
+        noPrice: order.no_price,
+        noPriceDollars: (order.no_price / 100).toFixed(2),
+        initialCount: order.initial_count,
+        createdTime: order.created_time,
+      },
+    }, { status: 201 });
   } catch (error) {
-    console.error("Error canceling order:", error);
+    console.error('Orders POST API error:', error);
+    
+    if (error instanceof KalshiApiError) {
+      return NextResponse.json(
+        { success: false, error: error.apiMessage },
+        { status: error.statusCode }
+      );
+    }
+    
     return NextResponse.json(
-      { ok: false, error: "Failed to cancel order" },
+      { success: false, error: 'Failed to create order' },
       { status: 500 }
     );
   }
