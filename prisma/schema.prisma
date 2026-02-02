@@ -491,3 +491,327 @@ model ArbitrageAlertConfig {
   
   @@map("arbitrage_alert_configs")
 }
+
+// ============================================
+// THESIS & EVIDENCE TRACKING
+// Every trade must be traceable to a thesis
+// ============================================
+
+enum ThesisStatus {
+  ACTIVE           // Currently valid thesis
+  EXECUTED         // Trade was placed
+  INVALIDATED      // Falsification criteria met
+  EXPIRED          // Time-based expiry
+  SUPERSEDED       // Replaced by newer thesis
+}
+
+model Thesis {
+  id                    String       @id @default(cuid())
+  
+  // Market reference
+  marketId              String
+  marketTicker          String
+  
+  // Core thesis
+  hypothesis            String       @db.Text  // "Why" - the trading rationale
+  direction             String       // "yes" or "no"
+  confidence            Decimal      @db.Decimal(5, 4)  // 0-1 probability
+  
+  // Model attribution
+  modelId               String       // Which model/strategy generated this
+  modelVersion          String       // For reproducibility
+  
+  // Evidence
+  evidenceLinks         String[]     // URLs to supporting evidence
+  evidenceSummary       String?      @db.Text
+  dataSnapshotId        String?
+  dataSnapshot          DataSnapshot? @relation(fields: [dataSnapshotId], references: [id])
+  
+  // Falsification
+  falsificationCriteria String       @db.Text  // When is this thesis wrong?
+  invalidatedAt         DateTime?
+  invalidationReason    String?
+  
+  // Pricing
+  targetPrice           Decimal      @db.Decimal(10, 4)  // Fair value (cents)
+  edgeRequired          Decimal      @default(2) @db.Decimal(10, 4)  // Min edge to trade
+  maxPrice              Decimal      @default(95) @db.Decimal(10, 4)  // Don't pay more
+  
+  // Lifecycle
+  status                ThesisStatus @default(ACTIVE)
+  expiresAt             DateTime?
+  
+  createdAt             DateTime     @default(now())
+  updatedAt             DateTime     @updatedAt
+  
+  // Relations
+  orders                ThesisOrder[]
+  
+  @@index([marketId])
+  @@index([modelId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("theses")
+}
+
+model ThesisOrder {
+  id            String   @id @default(cuid())
+  thesisId      String
+  thesis        Thesis   @relation(fields: [thesisId], references: [id])
+  orderId       String
+  
+  quantity      Int
+  price         Decimal  @db.Decimal(10, 4)
+  side          String   // "yes" or "no"
+  status        String
+  filledQty     Int      @default(0)
+  avgFillPrice  Decimal? @db.Decimal(10, 4)
+  
+  createdAt     DateTime @default(now())
+  
+  @@index([thesisId])
+  @@index([orderId])
+  @@map("thesis_orders")
+}
+
+model DataSnapshot {
+  id            String   @id @default(cuid())
+  
+  marketId      String
+  marketTicker  String
+  
+  // Price data
+  yesBid        Decimal  @db.Decimal(10, 4)
+  yesAsk        Decimal  @db.Decimal(10, 4)
+  noBid         Decimal  @db.Decimal(10, 4)
+  noAsk         Decimal  @db.Decimal(10, 4)
+  lastPrice     Decimal  @db.Decimal(10, 4)
+  
+  // Depth
+  bidDepth      Int      @default(0)
+  askDepth      Int      @default(0)
+  spread        Decimal  @db.Decimal(10, 4)
+  
+  // Market stats
+  volume24h     Int      @default(0)
+  openInterest  Int      @default(0)
+  
+  // Full orderbook (JSON)
+  fullOrderbook Json?
+  
+  // Additional metadata
+  metadata      Json?
+  
+  capturedAt    DateTime @default(now())
+  
+  // Relations
+  theses        Thesis[]
+  
+  @@index([marketId])
+  @@index([capturedAt])
+  @@map("data_snapshots")
+}
+
+// Performance tracking for model calibration
+model ThesisPerformance {
+  id                    String   @id @default(cuid())
+  thesisId              String
+  marketId              String
+  
+  // Prediction
+  predictedProbability  Decimal  @db.Decimal(5, 4)
+  actualOutcome         Boolean? // true = YES won, false = NO won
+  brierScore            Decimal? @db.Decimal(10, 8)
+  
+  // P&L
+  totalContracts        Int
+  avgEntryPrice         Decimal  @db.Decimal(10, 4)
+  exitPrice             Decimal? @db.Decimal(10, 4)
+  realizedPnl           Decimal? @db.Decimal(18, 8)
+  unrealizedPnl         Decimal? @db.Decimal(18, 8)
+  
+  // Attribution
+  modelId               String
+  category              String?
+  
+  evaluatedAt           DateTime @default(now())
+  
+  @@index([modelId])
+  @@index([evaluatedAt])
+  @@map("thesis_performance")
+}
+
+// ============================================
+// DAILY P&L TRACKING
+// ============================================
+
+model DailyPnL {
+  id              String   @id @default(cuid())
+  date            DateTime @db.Date @unique
+  
+  // P&L
+  realizedPnl     Decimal  @default(0) @db.Decimal(18, 8)
+  unrealizedPnl   Decimal  @default(0) @db.Decimal(18, 8)
+  fees            Decimal  @default(0) @db.Decimal(18, 8)
+  grossPnl        Decimal  @default(0) @db.Decimal(18, 8)
+  netPnl          Decimal  @default(0) @db.Decimal(18, 8)
+  
+  // Activity
+  tradesCount     Int      @default(0)
+  winCount        Int      @default(0)
+  lossCount       Int      @default(0)
+  positionsOpened Int      @default(0)
+  positionsClosed Int      @default(0)
+  
+  // Drawdown
+  peakPnl         Decimal  @default(0) @db.Decimal(18, 8)
+  drawdown        Decimal  @default(0) @db.Decimal(18, 8)
+  drawdownPct     Decimal  @default(0) @db.Decimal(10, 6)
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  @@index([date])
+  @@map("daily_pnl")
+}
+
+// ============================================
+// STRATEGY CONFIGURATION
+// ============================================
+
+enum StrategyType {
+  VALUE
+  NEWS
+  MARKET_MAKING
+  ARBITRAGE
+  HEDGING
+}
+
+enum StrategyStatus {
+  ACTIVE
+  PAUSED
+  DISABLED
+  ERROR
+}
+
+model StrategyConfig {
+  id                    String         @id @default(cuid())
+  name                  String
+  type                  StrategyType
+  
+  // Execution settings
+  enabled               Boolean        @default(true)
+  autoExecute           Boolean        @default(false)
+  maxOrdersPerHour      Int            @default(10)
+  maxPositionSize       Int            @default(100)
+  maxNotionalPerTrade   Decimal        @default(50) @db.Decimal(18, 8)
+  
+  // Risk settings
+  minEdge               Decimal        @default(2) @db.Decimal(10, 4)
+  minConfidence         Decimal        @default(0.55) @db.Decimal(5, 4)
+  maxSpread             Decimal        @default(10) @db.Decimal(10, 4)
+  minLiquidity          Int            @default(10)
+  
+  // Filters
+  allowedCategories     String[]
+  blockedCategories     String[]
+  blockedMarkets        String[]
+  
+  // Strategy-specific params
+  params                Json           @default("{}")
+  
+  createdAt             DateTime       @default(now())
+  updatedAt             DateTime       @updatedAt
+  
+  // Relations
+  state                 StrategyState?
+  
+  @@map("strategy_configs")
+}
+
+model StrategyState {
+  id                String         @id @default(cuid())
+  configId          String         @unique
+  config            StrategyConfig @relation(fields: [configId], references: [id])
+  status            StrategyStatus @default(DISABLED)
+  
+  // Runtime
+  lastRunAt         DateTime?
+  lastSignalAt      DateTime?
+  lastTradeAt       DateTime?
+  
+  // Errors
+  errorCount        Int            @default(0)
+  lastError         String?
+  lastErrorAt       DateTime?
+  
+  // Session stats
+  signalsGenerated  Int            @default(0)
+  tradesExecuted    Int            @default(0)
+  tradesRejected    Int            @default(0)
+  pnlToday          Decimal        @default(0) @db.Decimal(18, 8)
+  
+  updatedAt         DateTime       @updatedAt
+  
+  @@map("strategy_states")
+}
+
+// ============================================
+// SIGNALS
+// ============================================
+
+enum SignalType {
+  ENTRY
+  EXIT
+  SCALE_IN
+  SCALE_OUT
+  HEDGE
+}
+
+enum SignalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  EXECUTED
+  EXPIRED
+  CANCELLED
+}
+
+model Signal {
+  id              String       @id @default(cuid())
+  strategyId      String
+  marketId        String
+  marketTicker    String
+  
+  // Signal details
+  type            SignalType
+  direction       String       // "yes" or "no"
+  strength        Decimal      @db.Decimal(5, 4)
+  confidence      Decimal      @db.Decimal(5, 4)
+  
+  // Pricing
+  targetPrice     Decimal      @db.Decimal(10, 4)
+  currentPrice    Decimal      @db.Decimal(10, 4)
+  edge            Decimal      @db.Decimal(10, 4)
+  
+  // Context
+  reason          String       @db.Text
+  evidenceLinks   String[]
+  dataSnapshotId  String?
+  
+  // Lifecycle
+  status          SignalStatus @default(PENDING)
+  thesisId        String?
+  orderId         String?
+  
+  createdAt       DateTime     @default(now())
+  evaluatedAt     DateTime?
+  executedAt      DateTime?
+  expiredAt       DateTime?
+  
+  @@index([strategyId])
+  @@index([marketId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("signals")
+}
