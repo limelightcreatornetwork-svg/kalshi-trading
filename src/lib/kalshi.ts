@@ -395,7 +395,21 @@ export async function getOrders(params?: {
 }
 
 export async function createOrder(order: CreateOrderRequest): Promise<{ order: Order }> {
-  return apiRequest('POST', '/portfolio/orders', order as unknown as Record<string, unknown>);
+  const body: Record<string, unknown> = {
+    ticker: order.ticker,
+    side: order.side,
+    action: order.action,
+    type: order.type,
+    count: order.count,
+  };
+  if (order.yes_price !== undefined) body.yes_price = order.yes_price;
+  if (order.no_price !== undefined) body.no_price = order.no_price;
+  if (order.client_order_id) body.client_order_id = order.client_order_id;
+  if (order.time_in_force) body.time_in_force = order.time_in_force;
+  if (order.expiration_ts !== undefined) body.expiration_ts = order.expiration_ts;
+  if (order.post_only !== undefined) body.post_only = order.post_only;
+
+  return apiRequest('POST', '/portfolio/orders', body);
 }
 
 export async function cancelOrder(orderId: string): Promise<{ order: Order }> {
@@ -403,14 +417,8 @@ export async function cancelOrder(orderId: string): Promise<{ order: Order }> {
 }
 
 // ============================================================================
-// Legacy exports for backward compatibility (if needed elsewhere)
+// Additional Types
 // ============================================================================
-
-export interface KalshiConfig {
-  apiKeyId: string;
-  privateKey: string;
-  environment: 'demo' | 'production';
-}
 
 export interface KalshiEvent {
   event_ticker: string;
@@ -419,82 +427,4 @@ export interface KalshiEvent {
   sub_title?: string;
   mutually_exclusive: boolean;
   series_ticker?: string;
-}
-
-export interface KalshiMarket {
-  ticker: string;
-  event_ticker: string;
-  title: string;
-  subtitle?: string;
-  yes_bid: number;
-  yes_ask: number;
-  no_bid: number;
-  no_ask: number;
-  last_price: number;
-  volume: number;
-  open_interest: number;
-  status: 'active' | 'closed' | 'settled';
-  result?: 'yes' | 'no';
-  expiration_time: string;
-  close_time?: string;
-}
-
-export interface KalshiPosition {
-  ticker: string;
-  market_exposure: number;
-  position: number;
-  resting_orders_count: number;
-  total_traded: number;
-  realized_pnl: number;
-}
-
-export interface KalshiOrder {
-  order_id: string;
-  ticker: string;
-  action: 'buy' | 'sell';
-  side: 'yes' | 'no';
-  type: 'market' | 'limit';
-  count: number;
-  limit_price?: number;
-  status: 'pending' | 'active' | 'closed' | 'canceled';
-  created_time: string;
-  expiration_time?: string;
-}
-
-// Legacy singleton class (kept for any code that might use it)
-class KalshiClient {
-  private config: KalshiConfig | null = null;
-
-  configure(config: KalshiConfig) {
-    this.config = config;
-  }
-
-  isConfigured(): boolean {
-    return !!this.config?.apiKeyId && !!this.config?.privateKey;
-  }
-
-  async getBalance() {
-    return getBalance();
-  }
-
-  async getMarkets(params?: Parameters<typeof getMarkets>[0]) {
-    return getMarkets(params);
-  }
-
-  async getPositions() {
-    return getPositions();
-  }
-}
-
-export const kalshiClient = new KalshiClient();
-
-// Auto-configure from environment
-if (process.env.KALSHI_API_KEY_ID && process.env.KALSHI_API_PRIVATE_KEY) {
-  const envValue = (process.env.KALSHI_ENV || 'demo').trim().toLowerCase();
-  const validEnv = (envValue === 'production' || envValue === 'demo') ? envValue : 'demo';
-  kalshiClient.configure({
-    apiKeyId: process.env.KALSHI_API_KEY_ID.trim(),
-    privateKey: process.env.KALSHI_API_PRIVATE_KEY.trim(),
-    environment: validEnv as 'demo' | 'production',
-  });
 }
