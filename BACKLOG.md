@@ -40,7 +40,12 @@ _None_
 
 ## Completed
 
-_Items will be moved here after implementation_
+- [x] **KALSHI-001**: Add tests for kalshi.ts API client ✅ (82.35% coverage)
+- [x] **KALSHI-002**: Add request timeout (30s default) ✅
+- [x] **KALSHI-003**: Add retry logic with exponential backoff ✅
+- [x] **KALSHI-004**: Remove duplicate type definitions ✅
+- [x] **KALSHI-005**: Remove legacy KalshiClient class ✅
+- [x] **KALSHI-007**: Fix type cast bypass in createOrder ✅
 
 ---
 
@@ -49,3 +54,6 @@ _Items will be moved here after implementation_
 | Cycle | Date | Focus | Changes Made |
 |-------|------|-------|--------------|
 | 1 | 2026-02-02 | Analysis | Initial codebase analysis, coverage assessment |
+| 2 | 2026-02-02 | Reliability | Added request timeout and retry logic |
+| 3 | 2026-02-02 | Type Safety | Fixed type casts, removed duplicate types |
+| 4 | 2026-02-02 | Testing | Added 22 tests for kalshi.ts (3.4% → 82.35%)
