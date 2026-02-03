@@ -1,4 +1,4 @@
-import * as kalshi from './src/lib/kalshi';
+import * as kalshi from '../src/lib/kalshi';
 
 async function main() {
   console.log('=== CHECKING ACCOUNT STATUS ===\n');

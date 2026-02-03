@@ -44,9 +44,9 @@ next-env.d.ts
 .env*.local
 
 # Development scripts with credentials (should not be committed)
-execute-bet.ts
-find-best-bet.ts
-sb-events-search.ts
-superbowl-search.ts
-find-superbowl-best.ts
-search-all-sports.ts
+scripts/execute-bet.ts
+scripts/find-best-bet.ts
+scripts/sb-events-search.ts
+scripts/superbowl-search.ts
+scripts/find-superbowl-best.ts
+scripts/search-all-sports.ts
