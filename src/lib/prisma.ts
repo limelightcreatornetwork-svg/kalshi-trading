@@ -1,5 +1,6 @@
-// Prisma Client Singleton
+// Prisma Client Singleton with Neon Adapter (Prisma 7+)
 import { PrismaClient } from '@prisma/client';
+import { PrismaNeon } from '@prisma/adapter-neon';
 
 // PrismaClient is attached to the `global` object in development to prevent
 // exhausting your database connection limit.
@@ -12,8 +13,14 @@ const globalForPrisma = globalThis as unknown as {
 // Only initialize PrismaClient if DATABASE_URL is configured
 const isDatabaseConfigured = !!process.env.DATABASE_URL;
 
+function createPrismaClient(): PrismaClient {
+  const connectionString = process.env.DATABASE_URL!;
+  const adapter = new PrismaNeon({ connectionString });
+  return new PrismaClient({ adapter });
+}
+
 export const prisma: PrismaClient | null = isDatabaseConfigured
-  ? globalForPrisma.prisma ?? new PrismaClient()
+  ? globalForPrisma.prisma ?? createPrismaClient()
   : null;
 
 if (isDatabaseConfigured && process.env.NODE_ENV !== 'production') {

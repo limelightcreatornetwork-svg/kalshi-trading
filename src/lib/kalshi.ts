@@ -9,8 +9,8 @@
  * - Headers: KALSHI-ACCESS-KEY, KALSHI-ACCESS-SIGNATURE, KALSHI-ACCESS-TIMESTAMP
  */
 
-import crypto from 'crypto';
 import { apiLogger as log } from './logger';
+import { getAuthHeaders as generateAuthHeaders } from './kalshi-auth';
 
 // ============================================================================
 // Configuration
@@ -141,71 +141,17 @@ export interface BalanceResponse {
 // Signature Generation (RSA-PSS with SHA256)
 // ============================================================================
 
-function formatPrivateKey(key: string): string {
-  // If already formatted with headers, return as-is
-  if (key.includes('-----BEGIN')) {
-    return key;
+// Auth functions are now in kalshi-auth.ts module
+function getAuthHeaders(method: string, path: string): Record<string, string> {
+  const { apiKeyId, privateKey } = getConfig();
+  if (!apiKeyId) {
+    throw new KalshiApiError(500, 'Kalshi API key ID not configured');
   }
-
-  // Remove common prefixes like "Kalshi key: " (case-insensitive)
-  let cleanKey = key.replace(/^kalshi\s*key:\s*/i, '');
-
-  // Remove any whitespace/newlines
-  cleanKey = cleanKey.replace(/\s/g, '');
-
-  // Split into 64-character lines (PEM format requirement)
-  const lines: string[] = [];
-  for (let i = 0; i < cleanKey.length; i += 64) {
-    lines.push(cleanKey.slice(i, i + 64));
-  }
-
-  // Wrap with RSA PRIVATE KEY headers
-  return `-----BEGIN RSA PRIVATE KEY-----\n${lines.join('\n')}\n-----END RSA PRIVATE KEY-----`;
-}
-
-function signRequest(method: string, path: string, timestampMs: string): string {
-  const { privateKey } = getConfig();
   if (!privateKey) {
     throw new KalshiApiError(500, 'Kalshi private key not configured');
   }
 
-  // Kalshi signature format: timestamp (ms) + method + path
-  // IMPORTANT: Strip query parameters before signing
-  const pathWithoutQuery = path.split('?')[0];
-  const message = `${timestampMs}${method.toUpperCase()}${pathWithoutQuery}`;
-
-  // Format the private key properly for PEM
-  const pemKey = formatPrivateKey(privateKey);
-
-  // Use createSign with RSA-SHA256 and PSS padding as per Kalshi docs
-  const sign = crypto.createSign('RSA-SHA256');
-  sign.update(message);
-  sign.end();
-
-  const signature = sign.sign({
-    key: pemKey,
-    padding: crypto.constants.RSA_PKCS1_PSS_PADDING,
-    saltLength: crypto.constants.RSA_PSS_SALTLEN_DIGEST,
-  });
-
-  return signature.toString('base64');
-}
-
-function getAuthHeaders(method: string, path: string): Record<string, string> {
-  const { apiKeyId } = getConfig();
-  if (!apiKeyId) {
-    throw new KalshiApiError(500, 'Kalshi API key ID not configured');
-  }
-
-  const timestampMs = Date.now().toString();
-  const signature = signRequest(method, path, timestampMs);
-
-  return {
-    'Content-Type': 'application/json',
-    'KALSHI-ACCESS-KEY': apiKeyId,
-    'KALSHI-ACCESS-SIGNATURE': signature,
-    'KALSHI-ACCESS-TIMESTAMP': timestampMs,
-  };
+  return generateAuthHeaders(method, path, apiKeyId, privateKey);
 }
 
 // ============================================================================
