@@ -11,6 +11,7 @@ export * from './DailyPnLService';
 export * from './PreTradeCheckService';
 export * from './KalshiWebSocketService';
 export * from './ForecastingService';
+export * from './AnalyticsService';
 
 // Strategy implementations
 export * from './strategies/BaseStrategy';

@@ -676,6 +676,103 @@ model DailyPnL {
 }
 
 // ============================================
+// PORTFOLIO ANALYTICS - DAILY SNAPSHOTS
+// ============================================
+
+model DailySnapshot {
+  id                String   @id @default(cuid())
+  date              DateTime @db.Date @unique
+  
+  // Portfolio value breakdown
+  portfolioValue    Decimal  @db.Decimal(18, 8)  // Total portfolio value
+  cashBalance       Decimal  @db.Decimal(18, 8)  // Available cash
+  positionValue     Decimal  @db.Decimal(18, 8)  // Total value of open positions
+  
+  // P&L metrics
+  realizedPnL       Decimal  @default(0) @db.Decimal(18, 8)  // Cumulative realized P&L
+  unrealizedPnL     Decimal  @default(0) @db.Decimal(18, 8)  // Current unrealized P&L
+  dailyPnL          Decimal  @default(0) @db.Decimal(18, 8)  // P&L change from previous day
+  
+  // Position counts
+  openPositions     Int      @default(0)
+  closedPositions   Int      @default(0)  // Closed this day
+  
+  // High water mark for drawdown
+  highWaterMark     Decimal  @default(0) @db.Decimal(18, 8)
+  drawdownAmount    Decimal  @default(0) @db.Decimal(18, 8)
+  drawdownPercent   Decimal  @default(0) @db.Decimal(10, 6)
+  
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  
+  @@index([date])
+  @@map("daily_snapshots")
+}
+
+// ============================================
+// TRADE HISTORY - FOR ANALYTICS
+// ============================================
+
+enum TradeResult {
+  WIN
+  LOSS
+  BREAKEVEN
+  OPEN
+}
+
+model TradeHistory {
+  id              String      @id @default(cuid())
+  
+  // Market info
+  marketTicker    String
+  marketTitle     String?
+  
+  // Trade details
+  side            String      // "yes" or "no"
+  direction       String      // "long" or "short"
+  
+  // Entry
+  entryPrice      Decimal     @db.Decimal(10, 4)  // Average entry price (cents)
+  entryQuantity   Int         // Number of contracts
+  entryValue      Decimal     @db.Decimal(18, 8)  // Total entry cost
+  entryDate       DateTime
+  
+  // Exit (null if still open)
+  exitPrice       Decimal?    @db.Decimal(10, 4)  // Average exit price
+  exitQuantity    Int?        // Contracts exited
+  exitValue       Decimal?    @db.Decimal(18, 8)  // Total exit value
+  exitDate        DateTime?
+  
+  // Current state for open positions
+  currentPrice    Decimal?    @db.Decimal(10, 4)
+  currentQuantity Int?
+  
+  // P&L
+  realizedPnL     Decimal     @default(0) @db.Decimal(18, 8)
+  unrealizedPnL   Decimal     @default(0) @db.Decimal(18, 8)
+  fees            Decimal     @default(0) @db.Decimal(18, 8)
+  netPnL          Decimal     @default(0) @db.Decimal(18, 8)
+  pnlPercent      Decimal     @default(0) @db.Decimal(10, 6)
+  
+  // Trade result
+  result          TradeResult @default(OPEN)
+  holdingPeriod   Int?        // Days held (null if open)
+  
+  // Strategy attribution
+  strategyId      String?
+  thesisId        String?
+  
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+  
+  @@index([marketTicker])
+  @@index([result])
+  @@index([entryDate])
+  @@index([exitDate])
+  @@map("trade_history")
+}
+
+// ============================================
 // STRATEGY CONFIGURATION
 // ============================================
 
