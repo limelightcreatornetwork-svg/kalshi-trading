@@ -16,9 +16,9 @@
 - [ ] **KALSHI-013**: Implement unrealized P&L calculation (requires cost basis tracking)
 - [ ] **KALSHI-014**: Implement proper per-trade P&L tracking for win/loss stats
 - [ ] **KALSHI-015**: Update remaining API routes to use structured logging
-- [ ] **KALSHI-017**: Add tests for BaseStrategy (51.61% → target 80%+)
 - [ ] **KALSHI-018**: Add tests for storage services (0% coverage)
 - [ ] **KALSHI-019**: Add tests for TradePnLService (56.62% coverage)
+- [ ] **KALSHI-020**: Add tests for PreflightCheckService (69.91% coverage)
 
 #### P3 - Low Priority
 - [ ] **KALSHI-011**: Add request/response logging with configurable levels
@@ -39,6 +39,7 @@
 - [x] **KALSHI-009**: Add tests for StrategyRegistry ✅
 - [x] **KALSHI-010**: Add API route handler tests ✅
 - [x] **KALSHI-016**: Add comprehensive ValueStrategy tests ✅ (47.27% → 100% coverage)
+- [x] **KALSHI-017**: Add comprehensive BaseStrategy tests ✅ (51.61% → 100% coverage)
 - [x] **BUG-001**: Fix misleading P&L variable naming in risk dashboard ✅
 - [x] **BUG-002**: Fix invalid win/loss calculation logic in performance dashboard ✅
 - [x] **FEATURE-001**: Add /api/health endpoint for deployment monitoring ✅
@@ -62,17 +63,19 @@
 | 11 | 2026-02-02 | Testing | Market utils library (31 tests), 304 total |
 | 12 | 2026-02-02 | Documentation | Comprehensive README.md and CHANGELOG.md |
 | 13 | 2026-02-04 | Testing | ValueStrategy tests (24 new tests, 47% → 100%) |
+| 14 | 2026-02-04 | Testing | BaseStrategy tests (33 new tests, 51% → 100%) |
 
 ---
 
 ## Statistics
 
-- **Total Tests**: 549 (all passing)
-- **Coverage**: ~81% statements
+- **Total Tests**: 582 (all passing)
+- **Coverage**: ~83% statements
 - **Key Improvements**:
   - kalshi.ts: 3.41% → 82.35% (+79%)
   - ValueStrategy: 47.27% → 100% (+53%)
-  - Strategies overall: 40.17% → 74.35% (+34%)
+  - BaseStrategy: 51.61% → 100% (+48%)
+  - Strategies overall: 40.17% → 100% (+60%)
   - Added ForecastingService with 31 tests
   - Added market-utils with 31 tests
   - Added timeout/retry for API reliability
