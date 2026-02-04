@@ -16,7 +16,6 @@
 - [ ] **KALSHI-013**: Implement unrealized P&L calculation (requires cost basis tracking)
 - [ ] **KALSHI-014**: Implement proper per-trade P&L tracking for win/loss stats
 - [ ] **KALSHI-015**: Update remaining API routes to use structured logging
-- [ ] **KALSHI-020**: Add tests for PreflightCheckService (69.91% coverage)
 
 #### P3 - Low Priority
 - [ ] **KALSHI-011**: Add request/response logging with configurable levels
@@ -40,8 +39,12 @@
 - [x] **KALSHI-017**: Add comprehensive BaseStrategy tests ✅ (51.61% → 100% coverage)
 - [x] **KALSHI-018**: Add tests for storage services ✅ (0% → 100% coverage)
 - [x] **KALSHI-019**: Add tests for DailyPnLService ✅ (56.62% → 100% coverage)
+- [x] **KALSHI-020**: Add tests for PreTradeCheckService ✅ (69.91% → 100% coverage)
+- [x] **KALSHI-021**: Add comprehensive api-auth.ts tests ✅ (59.64% → 98.24% coverage)
+- [x] **KALSHI-022**: Add missing ThesisService tests ✅ (76.13% → 97.72% coverage)
 - [x] **BUG-001**: Fix misleading P&L variable naming in risk dashboard ✅
 - [x] **BUG-002**: Fix invalid win/loss calculation logic in performance dashboard ✅
+- [x] **BUG-003**: Fix Brier score calculation in ThesisService ✅ (used √ instead of ²)
 - [x] **FEATURE-001**: Add /api/health endpoint for deployment monitoring ✅
 
 ---
@@ -66,13 +69,15 @@
 | 14 | 2026-02-04 | Testing | BaseStrategy tests (33 new tests, 51% → 100%) |
 | 15 | 2026-02-04 | Testing | Storage services tests (61 new tests, 0% → 100%) |
 | 16 | 2026-02-04 | Testing | DailyPnLService tests (43 new tests, 56.62% → 100%) |
+| 17 | 2026-02-04 | Bug Fix | Database fallback for ArbitrageService (in-memory when no DB) |
+| 18 | 2026-02-04 | Bug Fix + Testing | Fixed Brier score bug, api-auth tests (21), ThesisService tests (23) |
 
 ---
 
 ## Statistics
 
-- **Total Tests**: 686 (all passing)
-- **Coverage**: ~87% statements
+- **Total Tests**: 782 (all passing)
+- **Coverage**: ~89% statements
 - **Key Improvements**:
   - kalshi.ts: 3.41% → 82.35% (+79%)
   - ValueStrategy: 47.27% → 100% (+53%)
@@ -80,10 +85,12 @@
   - Strategies overall: 40.17% → 100% (+60%)
   - Storage services: 0% → 100% (+100%)
   - DailyPnLService: 56.62% → 100% (+43%)
+  - api-auth.ts: 59.64% → 98.24% (+39%)
+  - ThesisService: 76.13% → 97.72% (+22%)
   - Added ForecastingService with 31 tests
   - Added market-utils with 31 tests
   - Added timeout/retry for API reliability
   - Added structured logging system
-  - Fixed 2 dashboard bugs
+  - Fixed 3 bugs (P&L naming, win/loss calc, Brier score)
   - Added health check endpoint
   - Created comprehensive README.md and CHANGELOG.md

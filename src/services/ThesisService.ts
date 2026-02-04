@@ -301,7 +301,7 @@ export class ThesisService {
       ? thesis.confidence 
       : (1 - thesis.confidence);
     const actualYes = actualOutcome ? 1 : 0;
-    const brierScore = Math.pow(predictedYes - actualYes, 0.5);
+    const brierScore = Math.pow(predictedYes - actualYes, 2);
 
     const perf: ThesisPerformance = {
       thesisId,
