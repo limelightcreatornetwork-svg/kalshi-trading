@@ -82,6 +82,9 @@ SECRETS_ENCRYPTION_KEY=your-64-char-hex-key
 KALSHI_APP_API_KEY=your-dashboard-api-key
 ```
 
+When `KALSHI_APP_API_KEY` is set, the UI will require a key stored in the browser.
+Use the “Set API Key” button in the top navigation to store it locally.
+
 ### Running the Application
 
 ```bash

@@ -1,13 +1,16 @@
 import { KillSwitchService } from '@/services/KillSwitchService';
 import { DailyPnLService } from '@/services/DailyPnLService';
 import { SecretsService } from '@/services/SecretsService';
+import { AnalyticsService, InMemorySnapshotStorage, InMemoryTradeStorage } from '@/services/AnalyticsService';
 import { PrismaKillSwitchStorage } from '@/services/storage/prismaKillSwitchStorage';
 import { PrismaDailyPnLStorage } from '@/services/storage/prismaDailyPnLStorage';
 import { PrismaSecretsStorage } from '@/services/storage/prismaSecretsStorage';
+import { PrismaSnapshotStorage, PrismaTradeStorage } from '@/services/storage/prismaAnalyticsStorage';
 
 let killSwitchService: KillSwitchService | null = null;
 let dailyPnLService: DailyPnLService | null = null;
 let secretsService: SecretsService | null = null;
+let analyticsService: AnalyticsService | null = null;
 
 export function getKillSwitchService(): KillSwitchService {
   if (!killSwitchService) {
@@ -32,4 +35,21 @@ export function getSecretsService(): SecretsService {
     secretsService = new SecretsService(new PrismaSecretsStorage(), encryptionKey);
   }
   return secretsService;
+}
+
+export function getAnalyticsService(): AnalyticsService {
+  if (!analyticsService) {
+    if (process.env.DATABASE_URL) {
+      analyticsService = new AnalyticsService(
+        new PrismaSnapshotStorage(),
+        new PrismaTradeStorage()
+      );
+    } else {
+      analyticsService = new AnalyticsService(
+        new InMemorySnapshotStorage(),
+        new InMemoryTradeStorage()
+      );
+    }
+  }
+  return analyticsService;
 }

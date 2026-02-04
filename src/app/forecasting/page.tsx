@@ -8,6 +8,7 @@ import type {
   ForecastingSummary,
   ForecastingConfig,
 } from '@/types/forecasting';
+import { apiFetch } from '@/lib/client-api';
 
 interface ForecastingData {
   summary: ForecastingSummary;
@@ -37,7 +38,7 @@ export default function ForecastingPage() {
         limit: '200',
       });
       
-      const res = await fetch(`/api/forecasting?${params}`);
+      const res = await apiFetch(`/api/forecasting?${params}`);
       const json = await res.json();
       
       if (json.success) {

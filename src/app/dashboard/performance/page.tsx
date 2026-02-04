@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Stat, StatGrid } from '@/components/ui/stat';
+import { apiFetch } from '@/lib/client-api';
 
 interface DailyPnL {
   date: string;
@@ -72,7 +73,7 @@ export default function PerformanceDashboard() {
   useEffect(() => {
     async function fetchData() {
       try {
-        const res = await fetch('/api/dashboard/performance');
+        const res = await apiFetch('/api/dashboard/performance');
         const json = await res.json();
         setData(json);
       } catch (error) {

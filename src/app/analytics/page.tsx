@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import { apiFetch } from '@/lib/client-api';
 
 // Types for API responses
 interface SnapshotData {
@@ -292,9 +293,9 @@ export default function AnalyticsPage() {
       }
 
       const [historyRes, positionsRes, statsRes] = await Promise.all([
-        fetch(`/api/analytics/history?startDate=${startDate}&endDate=${endDate}`),
-        fetch('/api/analytics/positions?includeClosed=true'),
-        fetch(`/api/analytics/stats?period=${period}`),
+        apiFetch(`/api/analytics/history?startDate=${startDate}&endDate=${endDate}`),
+        apiFetch('/api/analytics/positions?includeClosed=true'),
+        apiFetch(`/api/analytics/stats?period=${period}`),
       ]);
 
       const [historyData, positionsData, statsData] = await Promise.all([

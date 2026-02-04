@@ -1,11 +1,12 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { Switch } from '@/components/ui/switch';
 import { Stat, StatGrid } from '@/components/ui/stat';
+import { apiFetch } from '@/lib/client-api';
 
 interface RiskData {
   isSafe: boolean;
@@ -57,25 +58,50 @@ export default function RiskDashboard() {
   const [data, setData] = useState<RiskData | null>(null);
   const [loading, setLoading] = useState(true);
   const [killSwitchEnabled, setKillSwitchEnabled] = useState(true);
+  const [toggleLoading, setToggleLoading] = useState(false);
+  const [toggleError, setToggleError] = useState<string | null>(null);
+
+  const fetchData = useCallback(async () => {
+    try {
+      const res = await apiFetch('/api/dashboard/risk');
+      const json = await res.json();
+      setData(json);
+      setKillSwitchEnabled(json.killSwitch?.enabled ?? true);
+    } catch (error) {
+      console.error('Failed to fetch risk data:', error);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
-    async function fetchData() {
-      try {
-        const res = await fetch('/api/dashboard/risk');
-        const json = await res.json();
-        setData(json);
-        setKillSwitchEnabled(json.killSwitch?.enabled ?? true);
-      } catch (error) {
-        console.error('Failed to fetch risk data:', error);
-      } finally {
-        setLoading(false);
-      }
-    }
-
     fetchData();
     const interval = setInterval(fetchData, 10000); // Refresh every 10s
     return () => clearInterval(interval);
-  }, []);
+  }, [fetchData]);
+
+  const handleKillSwitchToggle = async (checked: boolean) => {
+    setToggleLoading(true);
+    setToggleError(null);
+    try {
+      const res = await apiFetch('/api/dashboard/killswitch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: checked ? 'enable' : 'disable' }),
+      });
+      const json = await res.json();
+      if (json.success) {
+        setKillSwitchEnabled(json.killSwitch?.enabled ?? checked);
+        await fetchData();
+      } else {
+        setToggleError(json.error || 'Failed to update kill switch');
+      }
+    } catch (error) {
+      setToggleError(error instanceof Error ? error.message : 'Failed to update kill switch');
+    } finally {
+      setToggleLoading(false);
+    }
+  };
 
   if (loading) {
     return (
@@ -128,6 +154,12 @@ export default function RiskDashboard() {
           </Badge>
         </div>
       </div>
+
+      {toggleError && (
+        <div className="p-3 bg-red-900/50 border border-red-500 rounded text-red-200 text-sm">
+          ⚠️ {toggleError}
+        </div>
+      )}
 
       {/* Quick Stats */}
       <StatGrid>
@@ -184,7 +216,8 @@ export default function RiskDashboard() {
               </div>
               <Switch
                 checked={killSwitchEnabled}
-                onCheckedChange={setKillSwitchEnabled}
+                onCheckedChange={handleKillSwitchToggle}
+                disabled={toggleLoading}
               />
             </div>
           </CardHeader>

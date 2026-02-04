@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import Link from "next/link";
 import "./globals.css";
+import ApiKeyControl from "@/components/api-key-control";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -40,11 +41,12 @@ function Navigation() {
               🎯 Arbitrage Scanner
             </Link>
             <Link
-              href="/api/markets"
+              href="/markets"
               className="text-zinc-400 hover:text-white transition-colors text-sm font-medium"
             >
-              📊 Markets API
+              📊 Markets
             </Link>
+            <ApiKeyControl />
           </div>
         </div>
       </div>

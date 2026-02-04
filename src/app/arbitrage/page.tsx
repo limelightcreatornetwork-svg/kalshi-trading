@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import type { ArbitrageOpportunity, MarketWithArbitrage, ArbitrageScanResult } from '@/types/arbitrage';
+import { apiFetch } from '@/lib/client-api';
 
 interface ScanStats {
   totalScans: number;
@@ -26,7 +27,7 @@ export default function ArbitragePage() {
   // Fetch current opportunities on mount
   const fetchOpportunities = useCallback(async () => {
     try {
-      const res = await fetch('/api/arbitrage/scan');
+      const res = await apiFetch('/api/arbitrage/scan');
       const data = await res.json();
       
       if (data.success) {
@@ -50,7 +51,7 @@ export default function ArbitragePage() {
     setError(null);
     
     try {
-      const res = await fetch('/api/arbitrage/scan', { method: 'POST' });
+      const res = await apiFetch('/api/arbitrage/scan', { method: 'POST' });
       const data = await res.json();
       
       if (data.success) {
@@ -76,7 +77,7 @@ export default function ArbitragePage() {
     setError(null);
     
     try {
-      const res = await fetch('/api/arbitrage/execute', {
+      const res = await apiFetch('/api/arbitrage/execute', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ opportunityId, contracts }),

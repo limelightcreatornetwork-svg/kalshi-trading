@@ -15,13 +15,17 @@ import {
   type DailySnapshot,
 } from '@/services/AnalyticsService';
 import { withAuth } from '@/lib/api-auth';
+import { getAnalyticsService } from '@/lib/service-factories';
+import { PrismaSnapshotStorage, PrismaTradeStorage } from '@/services/storage/prismaAnalyticsStorage';
 
-// Shared service instance with storage
-const snapshotStorage = new InMemorySnapshotStorage();
-const tradeStorage = new InMemoryTradeStorage();
+const usingDatabase = !!process.env.DATABASE_URL;
+const snapshotStorage = usingDatabase ? new PrismaSnapshotStorage() : new InMemorySnapshotStorage();
+const tradeStorage = usingDatabase ? new PrismaTradeStorage() : new InMemoryTradeStorage();
 
-// Export for testing and sharing across API routes
-export const analyticsService = new AnalyticsService(snapshotStorage, tradeStorage);
+export const analyticsService = usingDatabase
+  ? getAnalyticsService()
+  : new AnalyticsService(snapshotStorage, tradeStorage);
+
 export { snapshotStorage, tradeStorage };
 
 export const GET = withAuth(async function GET(request: NextRequest) {
