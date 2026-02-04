@@ -133,7 +133,6 @@ describe('ValueStrategy', () => {
         const context = createMarketContext({
           market: {
             id: 'test-market',
-            id: 'test-market',
             ticker: 'TEST',
             eventTicker: 'TEST-EVENT',
             title: 'Test',
@@ -161,7 +160,6 @@ describe('ValueStrategy', () => {
         // Fair value ~50, market ask at 49 = ~1 cent edge (below minEdge of 3)
         const context = createMarketContext({
           market: {
-            id: 'test-market',
             id: 'test-market',
             ticker: 'TEST',
             eventTicker: 'TEST-EVENT',
