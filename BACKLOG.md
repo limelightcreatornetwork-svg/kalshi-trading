@@ -16,7 +16,6 @@
 - [ ] **KALSHI-013**: Implement unrealized P&L calculation (requires cost basis tracking)
 - [ ] **KALSHI-014**: Implement proper per-trade P&L tracking for win/loss stats
 - [ ] **KALSHI-015**: Update remaining API routes to use structured logging
-- [ ] **KALSHI-019**: Add tests for TradePnLService (56.62% coverage)
 - [ ] **KALSHI-020**: Add tests for PreflightCheckService (69.91% coverage)
 
 #### P3 - Low Priority
@@ -40,6 +39,7 @@
 - [x] **KALSHI-016**: Add comprehensive ValueStrategy tests ✅ (47.27% → 100% coverage)
 - [x] **KALSHI-017**: Add comprehensive BaseStrategy tests ✅ (51.61% → 100% coverage)
 - [x] **KALSHI-018**: Add tests for storage services ✅ (0% → 100% coverage)
+- [x] **KALSHI-019**: Add tests for DailyPnLService ✅ (56.62% → 100% coverage)
 - [x] **BUG-001**: Fix misleading P&L variable naming in risk dashboard ✅
 - [x] **BUG-002**: Fix invalid win/loss calculation logic in performance dashboard ✅
 - [x] **FEATURE-001**: Add /api/health endpoint for deployment monitoring ✅
@@ -65,19 +65,21 @@
 | 13 | 2026-02-04 | Testing | ValueStrategy tests (24 new tests, 47% → 100%) |
 | 14 | 2026-02-04 | Testing | BaseStrategy tests (33 new tests, 51% → 100%) |
 | 15 | 2026-02-04 | Testing | Storage services tests (61 new tests, 0% → 100%) |
+| 16 | 2026-02-04 | Testing | DailyPnLService tests (43 new tests, 56.62% → 100%) |
 
 ---
 
 ## Statistics
 
-- **Total Tests**: 643 (all passing)
-- **Coverage**: ~85% statements
+- **Total Tests**: 686 (all passing)
+- **Coverage**: ~87% statements
 - **Key Improvements**:
   - kalshi.ts: 3.41% → 82.35% (+79%)
   - ValueStrategy: 47.27% → 100% (+53%)
   - BaseStrategy: 51.61% → 100% (+48%)
   - Strategies overall: 40.17% → 100% (+60%)
   - Storage services: 0% → 100% (+100%)
+  - DailyPnLService: 56.62% → 100% (+43%)
   - Added ForecastingService with 31 tests
   - Added market-utils with 31 tests
   - Added timeout/retry for API reliability
