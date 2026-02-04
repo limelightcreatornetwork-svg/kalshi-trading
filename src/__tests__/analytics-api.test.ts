@@ -774,3 +774,317 @@ describe('Analytics API Integration', () => {
     expect(parseFloat(data.data.summary.totalReturnPercent)).toBeCloseTo(3.0, 0);
   });
 });
+
+// =========================================================================
+// Error Path Tests (catch blocks)
+// =========================================================================
+describe('Analytics API Error Paths', () => {
+  beforeEach(() => {
+    snapshotStorage.clear();
+    tradeStorage.clear();
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-01-15'));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  // ── GET /api/analytics/history error ──────────────────────────────
+
+  it('GET /history should return 500 when getSnapshotHistory throws', async () => {
+    vi.spyOn(analyticsService, 'getSnapshotHistory').mockRejectedValueOnce(new Error('DB connection lost'));
+
+    const request = createRequest('http://localhost:3000/api/analytics/history');
+    const response = await getHistory(request);
+    const data = await response.json();
+
+    expect(response.status).toBe(500);
+    expect(data.success).toBe(false);
+    expect(data.error).toBe('DB connection lost');
+  });
+
+  it('GET /history should use default message for non-Error throws', async () => {
+    vi.spyOn(analyticsService, 'getSnapshotHistory').mockRejectedValueOnce('string error');
+
+    const request = createRequest('http://localhost:3000/api/analytics/history');
+    const response = await getHistory(request);
+    const data = await response.json();
+
+    expect(response.status).toBe(500);
+    expect(data.error).toBe('Failed to fetch analytics history');
+  });
+
+  // ── POST /api/analytics/history error ─────────────────────────────
+
+  it('POST /history should return 500 when createDailySnapshot throws', async () => {
+    vi.spyOn(analyticsService, 'createDailySnapshot').mockRejectedValueOnce(new Error('Storage full'));
+
+    const request = createRequest('http://localhost:3000/api/analytics/history', {
+      method: 'POST',
+      body: {
+        portfolioValue: 10000,
+        cashBalance: 5000,
+        positionValue: 5000,
+      },
+    });
+    const response = await postHistory(request);
+    const data = await response.json();
+
+    expect(response.status).toBe(500);
+    expect(data.success).toBe(false);
+    expect(data.error).toBe('Storage full');
+  });
+
+  it('POST /history should use default message for non-Error throws', async () => {
+    vi.spyOn(analyticsService, 'createDailySnapshot').mockRejectedValueOnce(42);
+
+    const request = createRequest('http://localhost:3000/api/analytics/history', {
+      method: 'POST',
+      body: {
+        portfolioValue: 10000,
+        cashBalance: 5000,
+        positionValue: 5000,
+      },
+    });
+    const response = await postHistory(request);
+    const data = await response.json();
+
+    expect(response.status).toBe(500);
+    expect(data.error).toBe('Failed to create snapshot');
+  });
+
+  // ── GET /api/analytics/positions error ────────────────────────────
+
+  it('GET /positions should return 500 when getPositionPerformance throws', async () => {
+    vi.spyOn(analyticsService, 'getPositionPerformance').mockRejectedValueOnce(new Error('Query failed'));
+
+    const request = createRequest('http://localhost:3000/api/analytics/positions');
+    const response = await getPositions(request);
+    const data = await response.json();
+
+    expect(response.status).toBe(500);
+    expect(data.success).toBe(false);
+    expect(data.error).toBe('Query failed');
+  });
+
+  it('GET /positions should use default message for non-Error throws', async () => {
+    vi.spyOn(analyticsService, 'getPositionPerformance').mockRejectedValueOnce(null);
+
+    const request = createRequest('http://localhost:3000/api/analytics/positions');
+    const response = await getPositions(request);
+    const data = await response.json();
+
+    expect(response.status).toBe(500);
+    expect(data.error).toBe('Failed to fetch position performance');
+  });
+
+  // ── POST /api/analytics/positions error ───────────────────────────
+
+  it('POST /positions should return 500 when recordTradeEntry throws', async () => {
+    vi.spyOn(analyticsService, 'recordTradeEntry').mockRejectedValueOnce(new Error('Duplicate trade'));
+
+    const request = createRequest('http://localhost:3000/api/analytics/positions', {
+      method: 'POST',
+      body: {
+        marketTicker: 'TEST',
+        side: 'yes',
+        entryPrice: 50,
+        entryQuantity: 10,
+        entryValue: 500,
+      },
+    });
+    const response = await postPosition(request);
+    const data = await response.json();
+
+    expect(response.status).toBe(500);
+    expect(data.success).toBe(false);
+    expect(data.error).toBe('Duplicate trade');
+  });
+
+  it('POST /positions should use default message for non-Error throws', async () => {
+    vi.spyOn(analyticsService, 'recordTradeEntry').mockRejectedValueOnce(undefined);
+
+    const request = createRequest('http://localhost:3000/api/analytics/positions', {
+      method: 'POST',
+      body: {
+        marketTicker: 'TEST',
+        side: 'yes',
+        entryPrice: 50,
+        entryQuantity: 10,
+        entryValue: 500,
+      },
+    });
+    const response = await postPosition(request);
+    const data = await response.json();
+
+    expect(response.status).toBe(500);
+    expect(data.error).toBe('Failed to record trade');
+  });
+
+  // ── PATCH /api/analytics/positions error ──────────────────────────
+
+  it('PATCH /positions should return 500 when updateTradePrice throws', async () => {
+    vi.spyOn(analyticsService, 'updateTradePrice').mockRejectedValueOnce(new Error('Internal error'));
+
+    const request = createRequest('http://localhost:3000/api/analytics/positions', {
+      method: 'PATCH',
+      body: {
+        tradeId: 'some-id',
+        action: 'updatePrice',
+        currentPrice: 60,
+      },
+    });
+    const response = await patchPosition(request);
+    const data = await response.json();
+
+    expect(response.status).toBe(500);
+    expect(data.success).toBe(false);
+    expect(data.error).toBe('Internal error');
+  });
+
+  it('PATCH /positions should return 500 when closeTrade throws', async () => {
+    vi.spyOn(analyticsService, 'closeTrade').mockRejectedValueOnce(new Error('Close failed'));
+
+    const request = createRequest('http://localhost:3000/api/analytics/positions', {
+      method: 'PATCH',
+      body: {
+        tradeId: 'some-id',
+        action: 'close',
+        exitPrice: 70,
+        exitQuantity: 10,
+        exitValue: 700,
+      },
+    });
+    const response = await patchPosition(request);
+    const data = await response.json();
+
+    expect(response.status).toBe(500);
+    expect(data.success).toBe(false);
+    expect(data.error).toBe('Close failed');
+  });
+
+  it('PATCH /positions should use default message for non-Error throws', async () => {
+    vi.spyOn(analyticsService, 'updateTradePrice').mockRejectedValueOnce({ code: 500 });
+
+    const request = createRequest('http://localhost:3000/api/analytics/positions', {
+      method: 'PATCH',
+      body: {
+        tradeId: 'some-id',
+        action: 'updatePrice',
+        currentPrice: 60,
+      },
+    });
+    const response = await patchPosition(request);
+    const data = await response.json();
+
+    expect(response.status).toBe(500);
+    expect(data.error).toBe('Failed to update trade');
+  });
+
+  // ── GET /api/analytics/stats error ────────────────────────────────
+
+  it('GET /stats should return 500 when calculateStats throws', async () => {
+    vi.spyOn(analyticsService, 'calculateStats').mockRejectedValueOnce(new Error('Stats calculation failed'));
+
+    const request = createRequest('http://localhost:3000/api/analytics/stats');
+    const response = await getStats(request);
+    const data = await response.json();
+
+    expect(response.status).toBe(500);
+    expect(data.success).toBe(false);
+    expect(data.error).toBe('Stats calculation failed');
+  });
+
+  it('GET /stats should use default message for non-Error throws', async () => {
+    vi.spyOn(analyticsService, 'calculateStats').mockRejectedValueOnce(false);
+
+    const request = createRequest('http://localhost:3000/api/analytics/stats');
+    const response = await getStats(request);
+    const data = await response.json();
+
+    expect(response.status).toBe(500);
+    expect(data.error).toBe('Failed to fetch analytics stats');
+  });
+
+  // ── PATCH close missing fields ────────────────────────────────────
+
+  it('PATCH /positions close should require exitPrice', async () => {
+    const trade = await analyticsService.recordTradeEntry({
+      marketTicker: 'CLOSE-FIELD',
+      side: 'yes',
+      entryPrice: 50,
+      entryQuantity: 10,
+      entryValue: 500,
+    });
+
+    const request = createRequest('http://localhost:3000/api/analytics/positions', {
+      method: 'PATCH',
+      body: {
+        tradeId: trade.id,
+        action: 'close',
+        // Missing exitPrice, exitQuantity, exitValue
+      },
+    });
+    const response = await patchPosition(request);
+    const data = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(data.error).toContain('Missing required field for close');
+  });
+
+  it('PATCH /positions updatePrice should require currentPrice', async () => {
+    const request = createRequest('http://localhost:3000/api/analytics/positions', {
+      method: 'PATCH',
+      body: {
+        tradeId: 'some-id',
+        action: 'updatePrice',
+        // Missing currentPrice
+      },
+    });
+    const response = await patchPosition(request);
+    const data = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(data.error).toContain('currentPrice');
+  });
+
+  it('PATCH /positions updatePrice should return 404 for closed/missing trade', async () => {
+    vi.spyOn(analyticsService, 'updateTradePrice').mockResolvedValueOnce(null);
+
+    const request = createRequest('http://localhost:3000/api/analytics/positions', {
+      method: 'PATCH',
+      body: {
+        tradeId: 'nonexistent',
+        action: 'updatePrice',
+        currentPrice: 60,
+      },
+    });
+    const response = await patchPosition(request);
+    const data = await response.json();
+
+    expect(response.status).toBe(404);
+    expect(data.error).toContain('not found');
+  });
+
+  it('PATCH /positions close should return 404 when trade not found', async () => {
+    vi.spyOn(analyticsService, 'closeTrade').mockResolvedValueOnce(null);
+
+    const request = createRequest('http://localhost:3000/api/analytics/positions', {
+      method: 'PATCH',
+      body: {
+        tradeId: 'nonexistent',
+        action: 'close',
+        exitPrice: 70,
+        exitQuantity: 10,
+        exitValue: 700,
+      },
+    });
+    const response = await patchPosition(request);
+    const data = await response.json();
+
+    expect(response.status).toBe(404);
+    expect(data.error).toContain('not found');
+  });
+});
