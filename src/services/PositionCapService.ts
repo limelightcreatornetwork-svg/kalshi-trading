@@ -20,6 +20,7 @@ export interface PositionCapStorage {
   createMarket(market: Market): Promise<void>;
   updateMarket(id: string, updates: Partial<Market>): Promise<void>;
   getPosition(marketId: string, side: string): Promise<Position | null>;
+  getAllPositions(): Promise<Position[]>;
   upsertPosition(position: Position): Promise<void>;
   getCaps(marketId?: string): Promise<PositionCap[]>;
   upsertCap(cap: PositionCap): Promise<void>;
