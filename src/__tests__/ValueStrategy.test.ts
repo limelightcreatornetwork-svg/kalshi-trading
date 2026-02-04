@@ -12,8 +12,7 @@ import {
 function createMarketContext(overrides?: Partial<StrategyContext>): StrategyContext {
   return {
     market: {
-            id: 'test-market',
-      id: 'test-market-id',
+      id: 'test-market',
       ticker: 'TEST-MARKET-YES',
       eventTicker: 'TEST-EVENT',
       title: 'Test Market',
@@ -97,7 +96,6 @@ describe('ValueStrategy', () => {
       // Strategy should use merged params (verify via signal generation)
       const context = createMarketContext({
         market: {
-            id: 'test-market',
           ticker: 'TEST',
           eventTicker: 'TEST-EVENT',
           title: 'Test',
@@ -325,7 +323,6 @@ describe('ValueStrategy', () => {
     it('should generate YES exit signal when YES position is overvalued', async () => {
       const context = createMarketContext({
         market: {
-            id: 'test-market',
           ticker: 'TEST',
           eventTicker: 'TEST-EVENT',
           title: 'Test',
@@ -364,7 +361,6 @@ describe('ValueStrategy', () => {
       // noBid must be > 56.6 + 2 = 58.6 to trigger exit
       const context = createMarketContext({
         market: {
-            id: 'test-market',
           ticker: 'TEST',
           eventTicker: 'TEST-EVENT',
           title: 'Test',
@@ -401,7 +397,6 @@ describe('ValueStrategy', () => {
     it('should not generate exit signal when position is not overvalued', async () => {
       const context = createMarketContext({
         market: {
-            id: 'test-market',
           ticker: 'TEST',
           eventTicker: 'TEST-EVENT',
           title: 'Test',
@@ -444,7 +439,6 @@ describe('ValueStrategy', () => {
       // Spread of 20 > maxSpread of 10
       const context = createMarketContext({
         market: {
-            id: 'test-market',
           ticker: 'TEST',
           eventTicker: 'TEST-EVENT',
           title: 'Test',
@@ -468,7 +462,6 @@ describe('ValueStrategy', () => {
       // marketFilters.maxSpread is 10
       const context = createMarketContext({
         market: {
-            id: 'test-market',
           ticker: 'TEST',
           eventTicker: 'TEST-EVENT',
           title: 'Test',
@@ -501,7 +494,6 @@ describe('ValueStrategy', () => {
       // Base confidence = 0.5 + (9.2/100) = 0.592 (> minConfidence 0.55)
       const lowVolumeContext = createMarketContext({
         market: {
-            id: 'test-market',
           ticker: 'TEST',
           eventTicker: 'TEST-EVENT',
           title: 'Test',
@@ -519,7 +511,6 @@ describe('ValueStrategy', () => {
 
       const highVolumeContext = createMarketContext({
         market: {
-            id: 'test-market',
           ticker: 'TEST',
           eventTicker: 'TEST-EVENT',
           title: 'Test',
@@ -557,7 +548,6 @@ describe('ValueStrategy', () => {
     it('should have higher strength with larger edge', async () => {
       const smallEdgeContext = createMarketContext({
         market: {
-            id: 'test-market',
           ticker: 'TEST',
           eventTicker: 'TEST-EVENT',
           title: 'Test',
@@ -575,7 +565,6 @@ describe('ValueStrategy', () => {
 
       const largeEdgeContext = createMarketContext({
         market: {
-            id: 'test-market',
           ticker: 'TEST',
           eventTicker: 'TEST-EVENT',
           title: 'Test',
@@ -620,7 +609,6 @@ describe('ValueStrategy', () => {
     it('should create thesis for strong signals', async () => {
       const context = createMarketContext({
         market: {
-            id: 'test-market',
           ticker: 'TEST',
           eventTicker: 'TEST-EVENT',
           title: 'Test',
@@ -678,7 +666,6 @@ describe('ValueStrategy', () => {
       
       const context = createMarketContext({
         market: {
-            id: 'test-market',
           ticker: 'TEST',
           eventTicker: 'TEST-EVENT',
           title: 'Test',
@@ -713,7 +700,6 @@ describe('ValueStrategy', () => {
       
       const context = createMarketContext({
         market: {
-            id: 'test-market',
           ticker: 'TEST',
           eventTicker: 'TEST-EVENT',
           title: 'Test',
