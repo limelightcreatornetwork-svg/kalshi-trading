@@ -90,12 +90,13 @@
 | 31 | 2026-02-04 | Testing | StrategyExecutor coverage tests (16 new, 72.04% → 100%) |
 | 32 | 2026-02-04 | Testing | Strategies API error/filter tests (7 new, 80.88% → ~100%) |
 | 33 | 2026-02-04 | Testing | service-factories getStrategyManagementService tests (3 new) |
+| 34 | 2026-02-04 | Quality | Fix duplicate id in ValueStrategy tests, OrderStateMachine terminal state tests (6 new) |
 
 ---
 
 ## Statistics
 
-- **Total Tests**: 1048 (all passing)
+- **Total Tests**: 1054 (all passing)
 - **Coverage**: ~96% statements
 - **Key Improvements**:
   - kalshi.ts: 3.41% → 94.82% (+91%)

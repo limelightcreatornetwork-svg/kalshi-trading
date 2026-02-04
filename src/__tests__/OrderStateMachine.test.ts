@@ -191,6 +191,53 @@ describe('OrderStateMachine', () => {
     });
   });
 
+  describe('timestamp updates for terminal states', () => {
+    it('should set rejectedAt when transitioning to REJECTED', () => {
+      const order = createTestOrder({ status: OrderStatus.PENDING_VALIDATION });
+      const result = stateMachine.transition(order, OrderStatus.REJECTED, 'Invalid order');
+
+      expect(result.success).toBe(true);
+      expect(result.order?.status).toBe(OrderStatus.REJECTED);
+      expect(result.order?.rejectedAt).toBeDefined();
+    });
+
+    it('should set expiredAt when transitioning to EXPIRED', () => {
+      const order = createTestOrder({ status: OrderStatus.ACKNOWLEDGED });
+      const result = stateMachine.transition(order, OrderStatus.EXPIRED, 'Order expired');
+
+      expect(result.success).toBe(true);
+      expect(result.order?.status).toBe(OrderStatus.EXPIRED);
+      expect(result.order?.expiredAt).toBeDefined();
+    });
+
+    it('should set failedAt when transitioning to FAILED', () => {
+      const order = createTestOrder({ status: OrderStatus.PENDING_VALIDATION });
+      const result = stateMachine.transition(order, OrderStatus.FAILED, 'System error');
+
+      expect(result.success).toBe(true);
+      expect(result.order?.status).toBe(OrderStatus.FAILED);
+      expect(result.order?.failedAt).toBeDefined();
+    });
+
+    it('should set cancelledAt when transitioning to CANCELLED', () => {
+      const order = createTestOrder({ status: OrderStatus.ACKNOWLEDGED });
+      const result = stateMachine.transition(order, OrderStatus.CANCELLED, 'User cancelled');
+
+      expect(result.success).toBe(true);
+      expect(result.order?.cancelledAt).toBeDefined();
+    });
+  });
+
+  describe('getProgress edge cases', () => {
+    it('should return 100% for EXPIRED terminal state', () => {
+      expect(stateMachine.getProgress(OrderStatus.EXPIRED)).toBe(100);
+    });
+
+    it('should return 100% for FAILED terminal state', () => {
+      expect(stateMachine.getProgress(OrderStatus.FAILED)).toBe(100);
+    });
+  });
+
   describe('processFill', () => {
     it('should process partial fill correctly', () => {
       const order = createTestOrder({
