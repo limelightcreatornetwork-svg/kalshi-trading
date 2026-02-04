@@ -1,8 +1,9 @@
 import { NextResponse } from 'next/server';
 import { getBalance, getPositions, getOrders } from '@/lib/kalshi';
 import { withAuth } from '@/lib/api-auth';
-import { getDailyPnLService, createUnrealizedPnLServiceWithPositions } from '@/lib/service-factories';
+import { getDailyPnLService, getAnalyticsService, createUnrealizedPnLServiceWithPositions } from '@/lib/service-factories';
 import { Position } from '@/types/position';
+import type { WinLossStats } from '@/services/AnalyticsService';
 
 export const GET = withAuth(async function GET() {
   try {
@@ -79,26 +80,80 @@ export const GET = withAuth(async function GET() {
     const maxDrawdown = calculateMaxDrawdown(returns);
     const volatility = calculateVolatility(returns);
 
-    const filledOrderCount = orders.filter((o) => o.status === 'executed' || o.fill_count > 0).length;
-    const totalTrades = totalRecordedTrades || filledOrderCount;
-    const wins = totalRecordedTrades ? totalWins : 0;
-    const losses = totalRecordedTrades ? totalLosses : 0;
-    const winRate = totalTrades > 0 ? (wins / totalTrades) * 100 : 0;
+    // Per-trade P&L stats from AnalyticsService (KALSHI-014)
+    let tradeStats: WinLossStats | null = null;
+    let recentClosedTrades: Array<{
+      id: string;
+      ticker: string;
+      side: string;
+      direction: string;
+      entryPrice: number;
+      exitPrice: number | null;
+      quantity: number;
+      pnl: string;
+      pnlPercent: string;
+      result: string;
+      holdingPeriod: number | null;
+      entryDate: string;
+      exitDate: string | null;
+    }> = [];
 
-    const recentTrades = orders
-      .filter((o) => o.status === 'executed' || o.fill_count > 0)
-      .slice(0, 10)
-      .map((o) => ({
-        id: o.order_id,
-        ticker: o.ticker,
-        side: o.side,
-        action: o.action,
-        quantity: o.fill_count,
-        price: (o.yes_price || o.no_price) / 100,
-        pnl: '0.00',
-        thesis: getThesisForTrade(o.ticker),
-        timestamp: o.created_time,
+    try {
+      const analytics = getAnalyticsService();
+      tradeStats = await analytics.calculateStats({ period: '30d' });
+      const bestWorst = await analytics.getBestAndWorstTrades(5);
+      const closedTrades = [...bestWorst.best, ...bestWorst.worst]
+        .sort((a, b) => (b.exitDate?.getTime() ?? 0) - (a.exitDate?.getTime() ?? 0))
+        .slice(0, 10);
+
+      recentClosedTrades = closedTrades.map((t) => ({
+        id: t.id,
+        ticker: t.marketTicker,
+        side: t.side,
+        direction: t.direction,
+        entryPrice: t.entryPrice / 100,
+        exitPrice: t.exitPrice !== null ? t.exitPrice / 100 : null,
+        quantity: t.entryQuantity,
+        pnl: (t.netPnL / 100).toFixed(2),
+        pnlPercent: t.pnlPercent.toFixed(2),
+        result: t.result,
+        holdingPeriod: t.holdingPeriod,
+        entryDate: t.entryDate.toISOString(),
+        exitDate: t.exitDate?.toISOString() ?? null,
       }));
+    } catch {
+      // Fall back to DailyPnL or order-based stats
+    }
+
+    // Use per-trade stats when available, fall back to DailyPnL aggregates
+    const filledOrderCount = orders.filter((o) => o.status === 'executed' || o.fill_count > 0).length;
+    const totalTrades = tradeStats?.totalTrades ?? (totalRecordedTrades || filledOrderCount);
+    const wins = tradeStats?.winCount ?? (totalRecordedTrades ? totalWins : 0);
+    const losses = tradeStats?.lossCount ?? (totalRecordedTrades ? totalLosses : 0);
+    const winRate = tradeStats
+      ? tradeStats.winRate * 100
+      : totalTrades > 0 ? (wins / totalTrades) * 100 : 0;
+
+    const recentTrades = recentClosedTrades.length > 0
+      ? recentClosedTrades
+      : orders
+          .filter((o) => o.status === 'executed' || o.fill_count > 0)
+          .slice(0, 10)
+          .map((o) => ({
+            id: o.order_id,
+            ticker: o.ticker,
+            side: o.side,
+            direction: o.side === 'yes' ? 'long' : 'short',
+            entryPrice: (o.yes_price || o.no_price) / 100,
+            exitPrice: null as number | null,
+            quantity: o.fill_count,
+            pnl: '0.00',
+            pnlPercent: '0.00',
+            result: 'UNKNOWN',
+            holdingPeriod: null as number | null,
+            entryDate: o.created_time,
+            exitDate: null as string | null,
+          }));
 
     let totalUnrealizedPnl = 0;
     try {
@@ -151,6 +206,16 @@ export const GET = withAuth(async function GET() {
         volatility,
         avgDailyReturn: returns.length > 0 ? returns.reduce((a, b) => a + b, 0) / returns.length : 0,
       },
+      perTradeMetrics: tradeStats ? {
+        profitFactor: tradeStats.profitFactor === Infinity ? null : tradeStats.profitFactor,
+        avgWin: tradeStats.avgWin / 100,
+        avgLoss: tradeStats.avgLoss / 100,
+        largestWin: tradeStats.largestWin / 100,
+        largestLoss: tradeStats.largestLoss / 100,
+        expectancy: tradeStats.expectancy / 100,
+        avgHoldingDays: tradeStats.avgHoldingDays,
+        breakeven: tradeStats.breakevenCount,
+      } : null,
       strategies: [],
       recentTrades,
       lastUpdated: new Date().toISOString(),
@@ -199,17 +264,3 @@ function calculateVolatility(returns: number[]): number {
   return Math.sqrt(variance * 252);
 }
 
-function getThesisForTrade(ticker: string): string {
-  const theses: Record<string, string> = {
-    KXBTC: 'BTC thesis tracked in strategy notes',
-    KXETH: 'ETH thesis tracked in strategy notes',
-    KXSPY: 'SPY thesis tracked in strategy notes',
-    KXFED: 'Fed thesis tracked in strategy notes',
-  };
-
-  for (const [key, thesis] of Object.entries(theses)) {
-    if (ticker.includes(key)) return thesis;
-  }
-
-  return 'No thesis data recorded';
-}

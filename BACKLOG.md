@@ -13,8 +13,7 @@
 ### Pending
 
 #### P2 - Medium Priority
-- [ ] **KALSHI-013**: Implement unrealized P&L calculation (requires cost basis tracking)
-- [ ] **KALSHI-014**: Implement proper per-trade P&L tracking for win/loss stats
+- [x] **KALSHI-014**: Implement proper per-trade P&L tracking for win/loss stats ✅
 - [ ] **KALSHI-015**: Update remaining API routes to use structured logging
 
 #### P3 - Low Priority
@@ -45,6 +44,8 @@
 - [x] **BUG-001**: Fix misleading P&L variable naming in risk dashboard ✅
 - [x] **BUG-002**: Fix invalid win/loss calculation logic in performance dashboard ✅
 - [x] **BUG-003**: Fix Brier score calculation in ThesisService ✅ (used √ instead of ²)
+- [x] **KALSHI-013**: Implement unrealized P&L calculation with cost basis tracking ✅ (35 tests)
+- [x] **KALSHI-014**: Per-trade P&L tracking in performance dashboard ✅ (AnalyticsService integration)
 - [x] **FEATURE-001**: Add /api/health endpoint for deployment monitoring ✅
 
 ---
@@ -71,12 +72,14 @@
 | 16 | 2026-02-04 | Testing | DailyPnLService tests (43 new tests, 56.62% → 100%) |
 | 17 | 2026-02-04 | Bug Fix | Database fallback for ArbitrageService (in-memory when no DB) |
 | 18 | 2026-02-04 | Bug Fix + Testing | Fixed Brier score bug, api-auth tests (21), ThesisService tests (23) |
+| 19 | 2026-02-04 | Feature | Unrealized P&L with cost basis tracking (35 tests), updated dashboards |
+| 20 | 2026-02-04 | Feature | Per-trade P&L tracking: integrated AnalyticsService into performance dashboard |
 
 ---
 
 ## Statistics
 
-- **Total Tests**: 782 (all passing)
+- **Total Tests**: 817 (all passing)
 - **Coverage**: ~89% statements
 - **Key Improvements**:
   - kalshi.ts: 3.41% → 82.35% (+79%)
@@ -94,3 +97,4 @@
   - Fixed 3 bugs (P&L naming, win/loss calc, Brier score)
   - Added health check endpoint
   - Created comprehensive README.md and CHANGELOG.md
+  - Added UnrealizedPnLService with mark-to-market P&L (35 tests)
