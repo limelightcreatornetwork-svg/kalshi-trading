@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server';
 import { getBalance, getPositions, getOrders } from '@/lib/kalshi';
 import { withAuth } from '@/lib/api-auth';
-import { getDailyPnLService } from '@/lib/service-factories';
+import { getDailyPnLService, createUnrealizedPnLServiceWithPositions } from '@/lib/service-factories';
+import { Position } from '@/types/position';
 
 export const GET = withAuth(async function GET() {
   try {
@@ -33,7 +34,7 @@ export const GET = withAuth(async function GET() {
       const end = new Date();
       const start = new Date();
       start.setDate(end.getDate() - 30);
-      const records = await getDailyPnLService().getRange(
+      const { records } = await getDailyPnLService().getPnLRange(
         start.toISOString().split('T')[0],
         end.toISOString().split('T')[0]
       );
@@ -99,7 +100,30 @@ export const GET = withAuth(async function GET() {
         timestamp: o.created_time,
       }));
 
-    const totalUnrealizedPnl = 0;
+    let totalUnrealizedPnl = 0;
+    try {
+      const positionsForPnL: Position[] = positions
+        .filter((p) => Math.abs(p.position) > 0)
+        .map((p) => ({
+          id: p.ticker,
+          marketId: p.ticker,
+          side: (p.position > 0 ? 'yes' : 'no') as 'yes' | 'no',
+          quantity: Math.abs(p.position),
+          avgPrice: Math.abs(p.market_exposure) / Math.abs(p.position),
+          realizedPnl: p.realized_pnl / 100,
+          unrealizedPnl: 0,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        }));
+
+      if (positionsForPnL.length > 0) {
+        const pnlService = createUnrealizedPnLServiceWithPositions(positionsForPnL);
+        const summary = await pnlService.refreshAll();
+        totalUnrealizedPnl = summary.totalUnrealizedPnl / 100; // cents to dollars
+      }
+    } catch {
+      // Fall back to 0 if market prices unavailable
+    }
     const summaryTotal = totalRealizedPnl + totalUnrealizedPnl - totalFees;
 
     const performanceData = {

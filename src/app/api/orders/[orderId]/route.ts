@@ -6,10 +6,10 @@ import { withAuth } from '@/lib/api-auth';
 
 export const DELETE = withAuth(async function DELETE(
   request: NextRequest,
-  context: { params: Promise<{ orderId: string }> }
+  context?: { params: Promise<Record<string, string>> }
 ) {
   try {
-    const { orderId } = await context.params;
+    const { orderId } = await context!.params;
 
     if (!orderId) {
       return NextResponse.json(

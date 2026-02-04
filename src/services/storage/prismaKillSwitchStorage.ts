@@ -106,7 +106,7 @@ export class PrismaKillSwitchStorage implements KillSwitchStorage {
       where: {
         level_targetId: {
           level,
-          targetId: targetId ?? null,
+          targetId: targetId ?? '',
         },
       },
     });
@@ -118,7 +118,7 @@ export class PrismaKillSwitchStorage implements KillSwitchStorage {
       where: {
         level_targetId: {
           level: config.level,
-          targetId: config.targetId ?? null,
+          targetId: config.targetId ?? '',
         },
       },
       create: {

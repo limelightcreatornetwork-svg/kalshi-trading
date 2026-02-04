@@ -28,15 +28,8 @@ function createPrismaClient(): PrismaClient | null {
   }
   
   try {
-    // For Neon serverless, we'd use the adapter, but for simplicity we'll use direct connection
-    // This can be enhanced later with proper Neon adapter setup
-    return new PrismaClient({
-      datasources: {
-        db: {
-          url: connectionString,
-        },
-      },
-    });
+    // DATABASE_URL is read automatically by Prisma from the environment
+    return new PrismaClient();
   } catch (error) {
     console.error('[Prisma] Failed to initialize PrismaClient:', error);
     return null;

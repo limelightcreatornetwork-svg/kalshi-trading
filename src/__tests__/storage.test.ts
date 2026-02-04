@@ -682,7 +682,7 @@ describe('PrismaKillSwitchStorage', () => {
         where: {
           level_targetId: {
             level: 'GLOBAL',
-            targetId: null,
+            targetId: '',
           },
         },
       });
@@ -758,7 +758,7 @@ describe('PrismaKillSwitchStorage', () => {
         where: {
           level_targetId: {
             level: 'GLOBAL',
-            targetId: null,
+            targetId: '',
           },
         },
         create: expect.objectContaining({
