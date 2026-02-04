@@ -455,3 +455,130 @@ describe('createKillSwitchService', () => {
     expect(service).toBeInstanceOf(KillSwitchService);
   });
 });
+
+describe('KillSwitchService - additional coverage', () => {
+  let storage: InMemoryKillSwitchStorage;
+  let service: KillSwitchService;
+
+  beforeEach(() => {
+    storage = new InMemoryKillSwitchStorage();
+    service = new KillSwitchService(storage);
+  });
+
+  describe('switchApplies - ACCOUNT level', () => {
+    it('should block when account-level switch matches accountId', async () => {
+      await storage.create({
+        id: 'ks-account',
+        level: KillSwitchLevel.ACCOUNT,
+        targetId: 'account-123',
+        isActive: true,
+        reason: KillSwitchReason.MANUAL,
+        triggeredBy: 'admin',
+        triggeredAt: new Date(),
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+
+      const result = await service.check({
+        accountId: 'account-123',
+      });
+
+      expect(result.isBlocked).toBe(true);
+      expect(result.blockingSwitch?.level).toBe(KillSwitchLevel.ACCOUNT);
+    });
+
+    it('should NOT block when account-level switch does not match accountId', async () => {
+      await storage.create({
+        id: 'ks-account',
+        level: KillSwitchLevel.ACCOUNT,
+        targetId: 'account-123',
+        isActive: true,
+        reason: KillSwitchReason.MANUAL,
+        triggeredBy: 'admin',
+        triggeredAt: new Date(),
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+
+      const result = await service.check({
+        accountId: 'different-account',
+      });
+
+      expect(result.isBlocked).toBe(false);
+    });
+  });
+
+  describe('switchApplies - unknown level (default case)', () => {
+    it('should not block for unrecognized kill switch level', async () => {
+      await storage.create({
+        id: 'ks-unknown',
+        level: 'UNKNOWN_LEVEL' as KillSwitchLevel,
+        targetId: 'some-target',
+        isActive: true,
+        reason: KillSwitchReason.MANUAL,
+        triggeredBy: 'admin',
+        triggeredAt: new Date(),
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+
+      const result = await service.check({
+        strategyId: 'any',
+        marketId: 'any',
+        accountId: 'any',
+      });
+
+      expect(result.isBlocked).toBe(false);
+      expect(result.activeCount).toBe(1);
+    });
+  });
+
+  describe('getActive', () => {
+    it('should return all active kill switches', async () => {
+      await storage.create({
+        id: 'ks-1',
+        level: KillSwitchLevel.GLOBAL,
+        isActive: true,
+        reason: KillSwitchReason.MANUAL,
+        triggeredBy: 'admin',
+        triggeredAt: new Date(),
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+      await storage.create({
+        id: 'ks-2',
+        level: KillSwitchLevel.MARKET,
+        targetId: 'market-1',
+        isActive: true,
+        reason: KillSwitchReason.LOSS_LIMIT,
+        triggeredBy: 'system',
+        triggeredAt: new Date(),
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+      await storage.create({
+        id: 'ks-3',
+        level: KillSwitchLevel.STRATEGY,
+        targetId: 'strat-1',
+        isActive: false,
+        reason: KillSwitchReason.MANUAL,
+        triggeredBy: 'admin',
+        triggeredAt: new Date(),
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+
+      const active = await service.getActive();
+
+      expect(active).toHaveLength(2);
+      expect(active.map(s => s.id)).toContain('ks-1');
+      expect(active.map(s => s.id)).toContain('ks-2');
+      expect(active.map(s => s.id)).not.toContain('ks-3');
+    });
+
+    it('should return empty array when no active switches', async () => {
+      const active = await service.getActive();
+      expect(active).toEqual([]);
+    });
+  });
+});

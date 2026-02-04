@@ -448,3 +448,138 @@ describe('Encryption security', () => {
     expect(parts).toHaveLength(3);
   });
 });
+
+// ─── Additional Coverage Tests ───────────────────────────────────────
+
+describe('SecretsService - additional coverage', () => {
+  describe('InMemorySecretsStorage.clear()', () => {
+    it('should clear all stored credentials', async () => {
+      const storage = new InMemorySecretsStorage();
+      const service = new SecretsService(storage, 'a'.repeat(64));
+
+      await service.createCredential('Key 1', 'kalshi', 'api-key-10001');
+      await service.createCredential('Key 2', 'polygon', 'api-key-20002');
+
+      const before = await storage.list();
+      expect(before).toHaveLength(2);
+
+      storage.clear();
+
+      const after = await storage.list();
+      expect(after).toHaveLength(0);
+    });
+  });
+
+  describe('decrypt - invalid ciphertext format', () => {
+    it('should throw when retrieving credential with corrupted ciphertext', async () => {
+      const storage = new InMemorySecretsStorage();
+      const service = new SecretsService(storage, 'a'.repeat(64));
+
+      // Store a credential with invalid ciphertext format directly
+      await storage.create({
+        id: 'corrupt-1',
+        name: 'Corrupted Key',
+        provider: 'kalshi',
+        apiKey: 'not-a-valid-ciphertext',  // Missing iv:authTag:encrypted format
+        scopes: ['read'],
+        isActive: true,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+
+      await expect(service.getCredentialDecrypted('corrupt-1')).rejects.toThrow('Invalid ciphertext format');
+    });
+
+    it('should throw when ciphertext has only one part', async () => {
+      const storage = new InMemorySecretsStorage();
+      const service = new SecretsService(storage, 'a'.repeat(64));
+
+      await storage.create({
+        id: 'corrupt-2',
+        name: 'Bad Key',
+        provider: 'kalshi',
+        apiKey: 'single-part-no-colons',
+        scopes: [],
+        isActive: true,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+
+      await expect(service.getCredentialDecrypted('corrupt-2')).rejects.toThrow('Invalid ciphertext format');
+    });
+  });
+
+  describe('deleteCredential - not found', () => {
+    it('should return false when credential does not exist', async () => {
+      const storage = new InMemorySecretsStorage();
+      const service = new SecretsService(storage, 'a'.repeat(64));
+
+      const result = await service.deleteCredential('nonexistent-id');
+      expect(result).toBe(false);
+    });
+
+    it('should return true when credential exists and is deleted', async () => {
+      const storage = new InMemorySecretsStorage();
+      const service = new SecretsService(storage, 'a'.repeat(64));
+
+      await service.createCredential('Key 1', 'kalshi', 'api-key-10001');
+      const all = await storage.list();
+      const id = all[0].id;
+
+      const result = await service.deleteCredential(id);
+      expect(result).toBe(true);
+
+      const after = await storage.list();
+      expect(after).toHaveLength(0);
+    });
+  });
+
+  describe('verifyCredential - decrypt failure', () => {
+    it('should return canDecrypt=false when ciphertext is corrupted', async () => {
+      const storage = new InMemorySecretsStorage();
+      const service = new SecretsService(storage, 'a'.repeat(64));
+
+      // Store credential with corrupted but properly formatted ciphertext
+      await storage.create({
+        id: 'bad-cred',
+        name: 'Bad Credential',
+        provider: 'kalshi',
+        apiKey: 'aaaa:bbbb:cccc',  // Three parts but not valid encrypted data
+        scopes: ['read', 'trade'],
+        isActive: true,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+
+      const result = await service.verifyCredential('bad-cred');
+      expect(result.canDecrypt).toBe(false);
+      expect(result.valid).toBe(false);
+      expect(result.provider).toBe('kalshi');
+      expect(result.scopes).toEqual(['read', 'trade']);
+    });
+
+    it('should return valid=false for non-existent credential', async () => {
+      const storage = new InMemorySecretsStorage();
+      const service = new SecretsService(storage, 'a'.repeat(64));
+
+      const result = await service.verifyCredential('nonexistent');
+      expect(result.valid).toBe(false);
+      expect(result.canDecrypt).toBe(false);
+      expect(result.provider).toBe('');
+      expect(result.scopes).toEqual([]);
+    });
+
+    it('should return valid=true and canDecrypt=true for properly encrypted credential', async () => {
+      const storage = new InMemorySecretsStorage();
+      const service = new SecretsService(storage, 'a'.repeat(64));
+
+      await service.createCredential('Good Key', 'kalshi', 'api-key-12345', undefined, ['read', 'trade']);
+
+      const all = await storage.list();
+      const result = await service.verifyCredential(all[0].id);
+      expect(result.valid).toBe(true);
+      expect(result.canDecrypt).toBe(true);
+      expect(result.provider).toBe('kalshi');
+    });
+  });
+});
