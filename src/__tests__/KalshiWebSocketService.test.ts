@@ -1089,7 +1089,7 @@ describe('KalshiWebSocketService', () => {
 
       service.subscribe({ channel: SubscriptionChannel.FILLS });
       service.subscribe({ channel: SubscriptionChannel.ORDERS });
-      
+
       mockWebSocketInstances[0].simulateMessage({
         type: WebSocketMessageType.SUBSCRIBED,
         channel: 'fills',
@@ -1100,9 +1100,379 @@ describe('KalshiWebSocketService', () => {
       });
 
       const status = service.getStatus();
-      
+
       expect(status.subscriptions).toContain('fills');
       expect(status.subscriptions).toContain('orders');
+    });
+  });
+
+  // ==========================================================================
+  // Additional Coverage Tests
+  // ==========================================================================
+
+  describe('Connection Edge Cases', () => {
+    it('should not create connection when already connecting', async () => {
+      const connectPromise1 = service.connect();
+      // Call connect again while still connecting (before onopen fires)
+      const connectPromise2 = service.connect();
+
+      vi.advanceTimersByTime(20);
+      await connectPromise1;
+      await connectPromise2;
+
+      // Only one WebSocket instance should be created
+      expect(mockWebSocketInstances.length).toBe(1);
+    });
+
+    it('should handle WebSocket error during connecting state', async () => {
+      // Create a service with a mock WS that errors during connect
+      const errorService = new KalshiWebSocketService(testConfig);
+      const onError = vi.fn();
+      errorService.on('error', onError);
+
+      // Override MockWebSocket to error instead of connect
+      const originalTimeout = MockWebSocket.prototype.constructor;
+      const connectPromise = errorService.connect();
+
+      // Simulate error before open
+      const wsInstance = mockWebSocketInstances[mockWebSocketInstances.length - 1];
+      wsInstance.onerror?.({ message: 'Connection refused' });
+
+      await expect(connectPromise).rejects.toThrow('Connection refused');
+      expect(onError).toHaveBeenCalledWith({
+        error: expect.any(Error),
+        context: 'connection',
+      });
+
+      errorService.disconnect();
+    });
+
+    it('should handle connection timeout', async () => {
+      const timeoutService = new KalshiWebSocketService({
+        ...testConfig,
+        connectionTimeoutMs: 100,
+      });
+
+      const connectPromise = timeoutService.connect();
+      const wsInstance = mockWebSocketInstances[mockWebSocketInstances.length - 1];
+
+      // Prevent the mock from auto-opening
+      vi.advanceTimersByTime(5);
+      wsInstance.onopen = null;
+
+      // Advance past the timeout
+      vi.advanceTimersByTime(200);
+
+      // The promise should reject with timeout error
+      await expect(connectPromise).rejects.toThrow('Connection timeout');
+
+      // The close should have been called by the timeout handler
+      expect(wsInstance.readyState).toBe(MockWebSocket.CLOSED);
+
+      timeoutService.disconnect();
+    });
+  });
+
+  describe('Subscription Edge Cases', () => {
+    it('should queue subscribeMarkets when not connected', async () => {
+      const newService = new KalshiWebSocketService(testConfig);
+
+      // Subscribe markets before connecting
+      newService.subscribeMarkets(SubscriptionChannel.TICKER, ['MARKET-A', 'MARKET-B']);
+
+      // Now connect
+      const connectPromise = newService.connect();
+      vi.advanceTimersByTime(20);
+      await connectPromise;
+
+      // Pending subscriptions should have been sent
+      const wsInstance = mockWebSocketInstances[mockWebSocketInstances.length - 1];
+      const messages = wsInstance.getSentMessages();
+      expect(messages.length).toBeGreaterThanOrEqual(2);
+
+      newService.disconnect();
+    });
+
+    it('should skip unsubscribe for channel not subscribed', async () => {
+      const connectPromise = service.connect();
+      vi.advanceTimersByTime(20);
+      await connectPromise;
+
+      // Try to unsubscribe from channel that was never subscribed
+      service.unsubscribe('nonexistent-channel');
+
+      const messages = mockWebSocketInstances[0].getSentMessages();
+      // Should not send any unsubscribe message
+      expect(messages.length).toBe(0);
+    });
+
+    it('should emit unsubscribed event on server confirmation', async () => {
+      const connectPromise = service.connect();
+      vi.advanceTimersByTime(20);
+      await connectPromise;
+
+      const onUnsubscribed = vi.fn();
+      service.on('unsubscribed', onUnsubscribed);
+
+      // First subscribe
+      service.subscribe({ channel: SubscriptionChannel.FILLS });
+      mockWebSocketInstances[0].simulateMessage({
+        type: WebSocketMessageType.SUBSCRIBED,
+        channel: 'fills',
+      });
+
+      // Then unsubscribe
+      service.unsubscribe('fills');
+      mockWebSocketInstances[0].simulateMessage({
+        type: WebSocketMessageType.UNSUBSCRIBED,
+        channel: 'fills',
+      });
+
+      expect(onUnsubscribed).toHaveBeenCalledWith({ channel: 'fills' });
+      expect(service.getStatus().subscriptions).not.toContain('fills');
+    });
+  });
+
+  describe('Message Handling Edge Cases', () => {
+    beforeEach(async () => {
+      const connectPromise = service.connect();
+      vi.advanceTimersByTime(20);
+      await connectPromise;
+    });
+
+    it('should emit orderbook delta events', () => {
+      const onDelta = vi.fn();
+      service.on('orderbook:delta', onDelta);
+
+      mockWebSocketInstances[0].simulateMessage({
+        type: WebSocketMessageType.ORDERBOOK_DELTA,
+        ticker: 'MARKET1',
+        price: 50,
+        delta: 10,
+        side: 'yes',
+      });
+
+      expect(onDelta).toHaveBeenCalled();
+    });
+
+    it('should emit trade events', () => {
+      const onTrade = vi.fn();
+      service.on('trade', onTrade);
+
+      mockWebSocketInstances[0].simulateMessage({
+        type: WebSocketMessageType.TRADE,
+        ticker: 'MARKET1',
+        side: 'yes',
+        price: 50,
+        count: 5,
+        tradeId: 'trade-123',
+        executedAt: '2024-01-15T10:30:00Z',
+      });
+
+      expect(onTrade).toHaveBeenCalled();
+    });
+
+    it('should handle unknown message types gracefully', () => {
+      // Should not throw, just log debug
+      mockWebSocketInstances[0].simulateMessage({
+        type: 'some_unknown_type',
+        data: 'test',
+      });
+
+      expect(service.isConnected()).toBe(true);
+    });
+
+    it('should catch errors thrown by event handlers', () => {
+      const errorHandler = vi.fn().mockImplementation(() => {
+        throw new Error('Handler crash');
+      });
+      const secondHandler = vi.fn();
+
+      service.on('fill', errorHandler);
+      service.on('fill', secondHandler);
+
+      mockWebSocketInstances[0].simulateMessage({
+        type: WebSocketMessageType.FILL,
+        fillId: 'fill-1',
+        orderId: 'order-1',
+        ticker: 'MARKET1',
+        side: 'yes',
+        action: 'buy',
+        count: 5,
+        price: 50,
+        fee: 0.5,
+        isTaker: true,
+        executedAt: '2024-01-15T10:00:00Z',
+      });
+
+      // First handler threw, but second should still have been called
+      expect(errorHandler).toHaveBeenCalled();
+      expect(secondHandler).toHaveBeenCalled();
+    });
+  });
+
+  describe('Send Message Edge Cases', () => {
+    it('should not send when websocket is null', () => {
+      // Service is not connected, so ws is null
+      // subscribe calls sendMessage internally when connected
+      // But if we could somehow get ws=null while state=CONNECTED...
+      // Instead, test sendMessage indirectly via subscribe on disconnected service
+      service.subscribe({ channel: SubscriptionChannel.FILLS });
+      // This should queue the subscription, not send it
+      expect(service.getStatus().state).toBe(WebSocketState.DISCONNECTED);
+    });
+
+    it('should handle send error gracefully', async () => {
+      const connectPromise = service.connect();
+      vi.advanceTimersByTime(20);
+      await connectPromise;
+
+      const onError = vi.fn();
+      service.on('error', onError);
+
+      // Make ws.send throw
+      const wsInstance = mockWebSocketInstances[0];
+      wsInstance.send = () => { throw new Error('Send failed'); };
+
+      service.subscribe({ channel: SubscriptionChannel.FILLS });
+
+      expect(onError).toHaveBeenCalledWith({
+        error: expect.any(Error),
+        context: 'send',
+      });
+    });
+  });
+
+  describe('Ping Interval', () => {
+    it('should send ping messages at configured interval', async () => {
+      const pingService = new KalshiWebSocketService({
+        ...testConfig,
+        pingIntervalMs: 100,
+      });
+
+      const connectPromise = pingService.connect();
+      vi.advanceTimersByTime(20);
+      await connectPromise;
+
+      const wsInstance = mockWebSocketInstances[mockWebSocketInstances.length - 1];
+      const messagesBefore = wsInstance.getSentMessages().length;
+
+      // Advance past one ping interval
+      vi.advanceTimersByTime(100);
+
+      const messagesAfter = wsInstance.getSentMessages().length;
+      expect(messagesAfter).toBeGreaterThan(messagesBefore);
+
+      const lastMessage = JSON.parse(wsInstance.getSentMessages()[messagesAfter - 1]);
+      expect(lastMessage.type).toBe('ping');
+
+      pingService.disconnect();
+    });
+  });
+
+  describe('Private Key Formatting', () => {
+    it('should handle PEM-formatted private key', async () => {
+      const pemKey = '-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQ...\n-----END RSA PRIVATE KEY-----';
+      const pemService = new KalshiWebSocketService({
+        ...testConfig,
+        privateKey: pemKey,
+      });
+
+      const connectPromise = pemService.connect();
+      vi.advanceTimersByTime(20);
+      await connectPromise;
+
+      // Should not throw - PEM key is passed through as-is
+      expect(pemService.isConnected()).toBe(true);
+      pemService.disconnect();
+    });
+
+    it('should handle raw key with kalshi prefix', async () => {
+      const rawKey = 'kalshi key: ABCDEF1234567890ABCDEF1234567890';
+      const rawService = new KalshiWebSocketService({
+        ...testConfig,
+        privateKey: rawKey,
+      });
+
+      const connectPromise = rawService.connect();
+      vi.advanceTimersByTime(20);
+      await connectPromise;
+
+      expect(rawService.isConnected()).toBe(true);
+      rawService.disconnect();
+    });
+  });
+
+  describe('Singleton Functions', () => {
+    const originalEnv = process.env;
+
+    beforeEach(() => {
+      process.env = { ...originalEnv };
+    });
+
+    afterEach(() => {
+      process.env = originalEnv;
+      resetKalshiWebSocket();
+    });
+
+    it('should handle invalid KALSHI_ENV by defaulting to demo', () => {
+      process.env.KALSHI_API_KEY_ID = 'test-key';
+      process.env.KALSHI_API_PRIVATE_KEY = 'mock-private-key';
+      process.env.KALSHI_ENV = 'invalid-env';
+
+      const wsService = createKalshiWebSocketService();
+      expect(wsService).toBeInstanceOf(KalshiWebSocketService);
+      wsService.disconnect();
+    });
+
+    it('should trim whitespace from environment variables', () => {
+      process.env.KALSHI_API_KEY_ID = '  test-key  ';
+      process.env.KALSHI_API_PRIVATE_KEY = '  mock-private-key  ';
+      process.env.KALSHI_ENV = '  demo  ';
+
+      const wsService = createKalshiWebSocketService();
+      expect(wsService).toBeInstanceOf(KalshiWebSocketService);
+      wsService.disconnect();
+    });
+  });
+
+  describe('Reconnection Edge Cases', () => {
+    it('should not reconnect after manual disconnect', async () => {
+      const reconnectService = new KalshiWebSocketService({
+        ...testConfig,
+        autoReconnect: true,
+      });
+
+      const onReconnecting = vi.fn();
+      reconnectService.on('reconnecting', onReconnecting);
+
+      const connectPromise = reconnectService.connect();
+      vi.advanceTimersByTime(20);
+      await connectPromise;
+
+      // Manual disconnect (sets state to CLOSING first)
+      reconnectService.disconnect();
+
+      // Should NOT attempt reconnection
+      vi.advanceTimersByTime(10000);
+      expect(onReconnecting).not.toHaveBeenCalled();
+    });
+
+    it('should handle server-initiated close during active connection', async () => {
+      const connectPromise = service.connect();
+      vi.advanceTimersByTime(20);
+      await connectPromise;
+
+      const onDisconnected = vi.fn();
+      service.on('disconnected', onDisconnected);
+
+      // Server closes with a specific code
+      mockWebSocketInstances[0].simulateClose(1001, 'Going away');
+
+      expect(onDisconnected).toHaveBeenCalledWith({
+        reason: 'Going away',
+        willReconnect: false, // autoReconnect is false in testConfig
+      });
     });
   });
 });

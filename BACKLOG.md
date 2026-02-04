@@ -91,13 +91,14 @@
 | 32 | 2026-02-04 | Testing | Strategies API error/filter tests (7 new, 80.88% → ~100%) |
 | 33 | 2026-02-04 | Testing | service-factories getStrategyManagementService tests (3 new) |
 | 34 | 2026-02-04 | Quality | Fix duplicate id in ValueStrategy tests, OrderStateMachine terminal state tests (6 new) |
+| 35 | 2026-02-04 | Testing | KalshiWebSocketService coverage tests (19 new, 82.45% → 95.17%) |
 
 ---
 
 ## Statistics
 
-- **Total Tests**: 1054 (all passing)
-- **Coverage**: ~96% statements
+- **Total Tests**: 1073 (all passing)
+- **Coverage**: ~97.12% statements
 - **Key Improvements**:
   - kalshi.ts: 3.41% → 94.82% (+91%)
   - ValueStrategy: 47.27% → 100% (+53%)
@@ -113,6 +114,7 @@
   - Analytics routes: 78-82% → 100% (+18-22%)
   - ArbitrageService: 66.91% → 97.74% (+31%)
   - StrategyExecutor: 72.04% → 100% (+28%)
+  - KalshiWebSocketService: 82.45% → 95.17% (+13%)
   - Added ForecastingService with 31 tests
   - Added market-utils with 31 tests
   - Added timeout/retry for API reliability
