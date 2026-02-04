@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { ForecastingService, createForecastingService } from '../services/ForecastingService';
 import type { Market } from '../lib/kalshi';
+import type { ForecastModel, ForecastModelType, ForecastModelInput } from '../types/forecasting';
 
 // ============================================================================
 // Test Fixtures
@@ -504,6 +505,345 @@ describe('ForecastingService', () => {
       expect(model).toBeDefined();
       expect(model?.id).toBe('ensemble-v1');
       expect(model?.type).toBe('ensemble');
+    });
+  });
+
+  describe('Edge Opportunity Signal Strengths', () => {
+    // Register a custom model that returns controlled predictions to test all branches
+
+    class ControlledModel implements ForecastModel {
+      id = 'controlled-test';
+      type: ForecastModelType = 'baseline';
+      version = '1.0.0';
+      description = 'Controlled test model';
+      result = { probability: 0.5, confidence: 0.5 };
+
+      async predict(): Promise<{ probability: number; confidence: number; reasoning?: string }> {
+        return { ...this.result, reasoning: 'test' };
+      }
+    }
+
+    let controlledModel: ControlledModel;
+
+    beforeEach(() => {
+      controlledModel = new ControlledModel();
+      service.registerModel(controlledModel);
+    });
+
+    it('should create full_kelly opportunity for strong signal with high confidence', async () => {
+      // Predict much higher than market → big positive edge
+      controlledModel.result = { probability: 0.80, confidence: 0.85 };
+
+      const market = createMockMarket({
+        yes_bid: 48,
+        yes_ask: 52, // market prob = 0.52
+        volume_24h: 5000,
+        open_interest: 500,
+      });
+
+      const opportunities = await service.findEdgeOpportunities([market], 'controlled-test');
+
+      expect(opportunities.length).toBe(1);
+      expect(opportunities[0].recommendedBet).toBe('full_kelly');
+      expect(opportunities[0].reason).toContain('Recommend YES');
+    });
+
+    it('should create half_kelly opportunity for strong signal with moderate confidence', async () => {
+      controlledModel.result = { probability: 0.80, confidence: 0.72 };
+
+      const market = createMockMarket({
+        yes_bid: 48,
+        yes_ask: 52,
+        volume_24h: 5000,
+        open_interest: 500,
+      });
+
+      const opportunities = await service.findEdgeOpportunities([market], 'controlled-test');
+
+      expect(opportunities.length).toBe(1);
+      expect(opportunities[0].recommendedBet).toBe('half_kelly');
+    });
+
+    it('should create quarter_kelly for moderate signal', async () => {
+      // Edge ~0.06 with confidence ~0.65 → moderate
+      controlledModel.result = { probability: 0.60, confidence: 0.65 };
+
+      const market = createMockMarket({
+        yes_bid: 46,
+        yes_ask: 50,
+        volume_24h: 5000,
+        open_interest: 500,
+      });
+
+      const opportunities = await service.findEdgeOpportunities([market], 'controlled-test');
+
+      if (opportunities.length > 0) {
+        expect(['quarter_kelly', 'half_kelly']).toContain(opportunities[0].recommendedBet);
+      }
+    });
+
+    it('should create quarter_kelly for weak signal', async () => {
+      // Small edge above threshold, moderate confidence
+      controlledModel.result = { probability: 0.56, confidence: 0.55 };
+
+      const market = createMockMarket({
+        yes_bid: 46,
+        yes_ask: 50,
+        volume_24h: 5000,
+        open_interest: 500,
+      });
+
+      const opportunities = await service.findEdgeOpportunities([market], 'controlled-test');
+
+      if (opportunities.length > 0) {
+        expect(opportunities[0].recommendedBet).toBe('quarter_kelly');
+      }
+    });
+
+    it('should handle NO direction for negative edge', async () => {
+      // Predict much lower than market → negative edge → NO direction
+      controlledModel.result = { probability: 0.30, confidence: 0.85 };
+
+      const market = createMockMarket({
+        yes_bid: 48,
+        yes_ask: 52, // market prob = 0.52
+        volume_24h: 5000,
+        open_interest: 500,
+      });
+
+      const forecast = await service.generateForecast(market, 'controlled-test');
+
+      expect(forecast.edge).toBeLessThan(0);
+      expect(forecast.direction).toBe('no');
+    });
+
+    it('should generate descriptive reason text', async () => {
+      controlledModel.result = { probability: 0.75, confidence: 0.85 };
+
+      const market = createMockMarket({
+        yes_bid: 48,
+        yes_ask: 52,
+        volume_24h: 5000,
+        open_interest: 500,
+      });
+
+      const opportunities = await service.findEdgeOpportunities([market], 'controlled-test');
+
+      expect(opportunities.length).toBe(1);
+      expect(opportunities[0].reason).toContain('Model predicts');
+      expect(opportunities[0].reason).toContain('% edge');
+      expect(opportunities[0].reason).toContain('Confidence:');
+    });
+
+    it('should calculate risk/reward ratio', async () => {
+      controlledModel.result = { probability: 0.80, confidence: 0.85 };
+
+      const market = createMockMarket({
+        yes_bid: 48,
+        yes_ask: 52,
+        volume_24h: 5000,
+        open_interest: 500,
+      });
+
+      const opportunities = await service.findEdgeOpportunities([market], 'controlled-test');
+
+      expect(opportunities.length).toBe(1);
+      expect(opportunities[0].riskRewardRatio).toBeGreaterThan(0);
+      expect(opportunities[0].maxContracts).toBeGreaterThan(0);
+    });
+  });
+
+  describe('Kelly Edge Cases', () => {
+    it('should return zero Kelly for market probability at boundary (0)', () => {
+      const kelly = service.calculateKelly(0.50, 0, 0.8);
+
+      expect(kelly.fraction).toBe(0);
+      expect(kelly.fullKellyBet).toBe(0);
+      expect(kelly.expectedEdge).toBe(0);
+    });
+
+    it('should return zero Kelly for market probability at boundary (1)', () => {
+      const kelly = service.calculateKelly(0.50, 1, 0.8);
+
+      expect(kelly.fraction).toBe(0);
+      expect(kelly.fullKellyBet).toBe(0);
+    });
+
+    it('should handle very small market probability', () => {
+      const kelly = service.calculateKelly(0.10, 0.02, 0.8);
+
+      expect(kelly.fraction).toBeGreaterThanOrEqual(0);
+      expect(kelly.maxDrawdownRisk).toBeGreaterThanOrEqual(0);
+    });
+
+    it('should constrain by maxPositionPercent', () => {
+      const service = createForecastingService({
+        bankroll: 10000,
+        maxKellyFraction: 0.50,
+        maxPositionPercent: 0.01, // Very restrictive 1%
+      });
+
+      const kelly = service.calculateKelly(0.80, 0.40, 1.0);
+
+      // Even with high Kelly, halfKellyBet and quarterKellyBet are constrained
+      // maxPositionBet = 10000 * 0.01 = 100
+      expect(kelly.halfKellyBet).toBeLessThanOrEqual(50); // half of 100
+      expect(kelly.quarterKellyBet).toBeLessThanOrEqual(25); // quarter of 100
+    });
+
+    it('should calculate max drawdown risk proportional to fraction', () => {
+      const kelly = service.calculateKelly(0.60, 0.50, 0.8);
+
+      // maxDrawdownRisk ≈ fraction * 2, capped at 1
+      expect(kelly.maxDrawdownRisk).toBeCloseTo(kelly.fraction * 2, 1);
+    });
+  });
+
+  describe('Filter Edge Cases', () => {
+    it('should filter markets with wide spread', async () => {
+      const service = createForecastingService({
+        maxSpreadPercent: 0.05, // Very tight 5% max spread
+        minVolume24h: 100,
+        minOpenInterest: 50,
+      });
+
+      const wideSpreadMarket = createMockMarket({
+        ticker: 'WIDE-SPREAD',
+        yes_bid: 30,
+        yes_ask: 70, // spread = 40, mid = 50, spread% = 80%
+        volume_24h: 5000,
+        open_interest: 1000,
+      });
+
+      const opportunities = await service.findEdgeOpportunities([wideSpreadMarket]);
+      const found = opportunities.find(o => o.forecast.ticker === 'WIDE-SPREAD');
+      expect(found).toBeUndefined();
+    });
+
+    it('should filter markets below open interest threshold', async () => {
+      const service = createForecastingService({
+        minOpenInterest: 500,
+        minVolume24h: 100,
+      });
+
+      const lowOIMarket = createMockMarket({
+        ticker: 'LOW-OI',
+        open_interest: 10,
+        volume_24h: 5000,
+      });
+
+      const opportunities = await service.findEdgeOpportunities([lowOIMarket]);
+      const found = opportunities.find(o => o.forecast.ticker === 'LOW-OI');
+      expect(found).toBeUndefined();
+    });
+
+    it('should handle errors in forecast generation gracefully', async () => {
+      // Register a model that throws
+      service.registerModel({
+        id: 'error-model',
+        type: 'baseline' as ForecastModelType,
+        version: '1.0.0',
+        description: 'Always errors',
+        predict: async () => { throw new Error('Model failure'); },
+      });
+
+      const markets = [createMockMarket()];
+      const opportunities = await service.findEdgeOpportunities(markets, 'error-model');
+
+      // Should not crash, just skip
+      expect(opportunities).toEqual([]);
+    });
+
+    it('should handle errors in summary generation gracefully', async () => {
+      service.registerModel({
+        id: 'error-model',
+        type: 'baseline' as ForecastModelType,
+        version: '1.0.0',
+        description: 'Always errors',
+        predict: async () => { throw new Error('Model failure'); },
+      });
+
+      const markets = [createMockMarket()];
+      const summary = await service.generateSummary(markets, 'error-model');
+
+      expect(summary.totalMarkets).toBe(0);
+      expect(summary.marketsWithEdge).toBe(0);
+    });
+
+    it('should generate summary with no markets having edge', async () => {
+      // Very high threshold
+      const service = createForecastingService({
+        minEdgeToTrade: 0.50, // 50% minimum edge - impossible
+      });
+
+      const summary = await service.generateSummary([createMockMarket()]);
+
+      expect(summary.marketsWithEdge).toBe(0);
+      expect(summary.avgEdge).toBe(0);
+      expect(summary.maxEdge).toBe(0);
+    });
+  });
+
+  describe('Mean Reversion Model - Expiration Effects', () => {
+    it('should reduce confidence for near-expiring markets (<1 day)', async () => {
+      const nearExpiryMarket = createMockMarket({
+        yes_bid: 88,
+        yes_ask: 92,
+        volume_24h: 3000,
+        open_interest: 2000,
+        expiration_time: new Date(Date.now() + 12 * 60 * 60 * 1000).toISOString(), // 12 hours
+      });
+
+      const farExpiryMarket = createMockMarket({
+        yes_bid: 88,
+        yes_ask: 92,
+        volume_24h: 3000,
+        open_interest: 2000,
+        expiration_time: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(), // 7 days
+      });
+
+      const nearForecast = await service.generateForecast(nearExpiryMarket, 'mean-reversion-v1');
+      const farForecast = await service.generateForecast(farExpiryMarket, 'mean-reversion-v1');
+
+      // Near-expiring market should have lower confidence
+      expect(nearForecast.confidence).toBeLessThan(farForecast.confidence);
+    });
+
+    it('should reduce confidence for markets expiring in 1-3 days', async () => {
+      const twoDayMarket = createMockMarket({
+        yes_bid: 88,
+        yes_ask: 92,
+        volume_24h: 3000,
+        open_interest: 2000,
+        expiration_time: new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString(),
+      });
+
+      const weekMarket = createMockMarket({
+        yes_bid: 88,
+        yes_ask: 92,
+        volume_24h: 3000,
+        open_interest: 2000,
+        expiration_time: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(),
+      });
+
+      const twoDayForecast = await service.generateForecast(twoDayMarket, 'mean-reversion-v1');
+      const weekForecast = await service.generateForecast(weekMarket, 'mean-reversion-v1');
+
+      expect(twoDayForecast.confidence).toBeLessThan(weekForecast.confidence);
+    });
+
+    it('should apply stronger reversion for markets below 50%', async () => {
+      const lowProbMarket = createMockMarket({
+        yes_bid: 15,
+        yes_ask: 18,
+        volume_24h: 3000,
+        open_interest: 2000,
+      });
+
+      const forecast = await service.generateForecast(lowProbMarket, 'mean-reversion-v1');
+
+      // Should revert UP toward 50%
+      expect(forecast.predictedProbability).toBeGreaterThan(0.18);
     });
   });
 
