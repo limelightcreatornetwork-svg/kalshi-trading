@@ -18,7 +18,7 @@
 
 #### P3 - Low Priority
 - [x] **KALSHI-011**: Add request/response logging with configurable levels ✅
-- [ ] **KALSHI-012**: Add rate limiting handling for API calls
+- [x] **KALSHI-012**: Add rate limiting handling for API calls ✅
 
 ---
 
@@ -48,6 +48,7 @@
 - [x] **KALSHI-014**: Per-trade P&L tracking in performance dashboard ✅ (AnalyticsService integration)
 - [x] **KALSHI-015**: Structured logging across all API routes ✅ (10 routes updated)
 - [x] **KALSHI-011**: Request/response logging in Kalshi API client ✅ (with timing, retries)
+- [x] **KALSHI-012**: Rate limiting with Retry-After parsing and proactive throttle ✅
 - [x] **FEATURE-001**: Add /api/health endpoint for deployment monitoring ✅
 
 ---
@@ -78,6 +79,7 @@
 | 20 | 2026-02-04 | Feature | Per-trade P&L tracking: integrated AnalyticsService into performance dashboard |
 | 21 | 2026-02-04 | Quality | Structured logging in all API routes (10 routes, handleApiError utility) |
 | 22 | 2026-02-04 | Quality | Request/response logging in Kalshi API client with timing metrics |
+| 23 | 2026-02-04 | Reliability | Rate limiter with Retry-After parsing and proactive request throttle |
 
 ---
 

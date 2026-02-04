@@ -161,9 +161,66 @@ function getAuthHeaders(method: string, path: string): Record<string, string> {
 const DEFAULT_TIMEOUT_MS = 30000;
 const MAX_RETRIES = 3;
 const RETRY_BASE_DELAY_MS = 1000;
+const MIN_REQUEST_INTERVAL_MS = 100; // 10 req/sec default throttle
 
 // Status codes that are safe to retry
 const RETRYABLE_STATUS_CODES = new Set([408, 429, 500, 502, 503, 504]);
+
+// ============================================================================
+// Rate Limiter - proactive throttling to avoid 429s
+// ============================================================================
+
+class RateLimiter {
+  private lastRequestTime = 0;
+  private minIntervalMs: number;
+  private retryAfterUntil = 0; // Timestamp when Retry-After period ends
+
+  constructor(minIntervalMs: number = MIN_REQUEST_INTERVAL_MS) {
+    this.minIntervalMs = minIntervalMs;
+  }
+
+  async waitForSlot(): Promise<void> {
+    const now = Date.now();
+
+    // Respect Retry-After from previous 429 response
+    if (this.retryAfterUntil > now) {
+      const waitMs = this.retryAfterUntil - now;
+      log.debug('Rate limit wait (Retry-After)', { waitMs });
+      await sleep(waitMs);
+    }
+
+    // Enforce minimum interval between requests
+    const elapsed = Date.now() - this.lastRequestTime;
+    if (elapsed < this.minIntervalMs) {
+      await sleep(this.minIntervalMs - elapsed);
+    }
+
+    this.lastRequestTime = Date.now();
+  }
+
+  setRetryAfter(seconds: number): void {
+    this.retryAfterUntil = Date.now() + (seconds * 1000);
+  }
+
+  parseRetryAfter(response: Response): number {
+    const header = response.headers.get('Retry-After');
+    if (!header) return 0;
+
+    const seconds = parseInt(header, 10);
+    if (!isNaN(seconds) && seconds > 0) return seconds;
+
+    // Try parsing as HTTP-date
+    const date = Date.parse(header);
+    if (!isNaN(date)) {
+      const delayMs = date - Date.now();
+      return delayMs > 0 ? Math.ceil(delayMs / 1000) : 0;
+    }
+
+    return 0;
+  }
+}
+
+const rateLimiter = new RateLimiter();
 
 async function fetchWithTimeout(
   url: string,
@@ -204,6 +261,7 @@ async function apiRequest<T>(
   let lastError: Error | null = null;
 
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+    await rateLimiter.waitForSlot();
     const startTime = Date.now();
     try {
       // Generate fresh auth headers for each attempt (timestamp must be current)
@@ -234,9 +292,20 @@ async function apiRequest<T>(
 
         log.warn('API error response', { method, endpoint, status: response.status, durationMs, message: apiMessage });
 
+        // Handle 429 rate limiting with Retry-After header
+        if (response.status === 429) {
+          const retryAfterSec = rateLimiter.parseRetryAfter(response);
+          if (retryAfterSec > 0) {
+            rateLimiter.setRetryAfter(retryAfterSec);
+            log.warn('Rate limited (429)', { method, endpoint, retryAfterSec });
+          }
+        }
+
         // Check if this error is retryable
         if (RETRYABLE_STATUS_CODES.has(response.status) && attempt < MAX_RETRIES - 1) {
-          const delayMs = RETRY_BASE_DELAY_MS * Math.pow(2, attempt);
+          const delayMs = response.status === 429
+            ? Math.max(RETRY_BASE_DELAY_MS * Math.pow(2, attempt), (rateLimiter.parseRetryAfter(response) || 1) * 1000)
+            : RETRY_BASE_DELAY_MS * Math.pow(2, attempt);
           log.debug('Retrying request', { method, endpoint, attempt: attempt + 1, delayMs });
           await sleep(delayMs);
           continue;
