@@ -61,6 +61,14 @@ import {
   PreTradeCheckConfig,
 } from '../../services/PreTradeCheckService';
 
+import {
+  UnrealizedPnLService,
+  UnrealizedPnLServiceConfig,
+  UnrealizedPnLServiceEvents,
+  MarketPriceProvider,
+  MarketPrice,
+} from '../../services/UnrealizedPnLService';
+
 // ─── InMemoryIdempotencyStorage ─────────────────────────────────────────
 
 export class InMemoryIdempotencyStorage implements IdempotencyStorage {
@@ -191,6 +199,10 @@ export class InMemoryPositionCapStorage implements PositionCapStorage {
 
   async getPosition(marketId: string, side: string): Promise<Position | null> {
     return this.positions.get(`${marketId}:${side}`) ?? null;
+  }
+
+  async getAllPositions(): Promise<Position[]> {
+    return Array.from(this.positions.values());
   }
 
   async upsertPosition(position: Position): Promise<void> {
@@ -365,4 +377,59 @@ export function createPreTradeCheckService(
   config: Partial<PreTradeCheckConfig> = {}
 ): PreTradeCheckService {
   return new PreTradeCheckService(config);
+}
+
+// ─── InMemoryMarketPriceProvider ────────────────────────────────────────
+
+export class InMemoryMarketPriceProvider implements MarketPriceProvider {
+  private prices: Map<string, MarketPrice> = new Map();
+
+  setPrice(ticker: string, price: MarketPrice): void {
+    this.prices.set(ticker, price);
+  }
+
+  setPriceSimple(
+    ticker: string,
+    yesBid: number,
+    yesAsk: number,
+    lastPrice?: number
+  ): void {
+    this.prices.set(ticker, {
+      ticker,
+      yesBid,
+      yesAsk,
+      noBid: 100 - yesAsk,
+      noAsk: 100 - yesBid,
+      lastPrice: lastPrice ?? (yesBid + yesAsk) / 2,
+    });
+  }
+
+  async getMarketPrices(tickers: string[]): Promise<Map<string, MarketPrice>> {
+    const result = new Map<string, MarketPrice>();
+    for (const ticker of tickers) {
+      const price = this.prices.get(ticker);
+      if (price) result.set(ticker, price);
+    }
+    return result;
+  }
+
+  clear(): void {
+    this.prices.clear();
+  }
+}
+
+// ─── UnrealizedPnLService factory ───────────────────────────────────────
+
+export function createUnrealizedPnLService(
+  config: Partial<UnrealizedPnLServiceConfig> = {},
+  events: UnrealizedPnLServiceEvents = {}
+): {
+  service: UnrealizedPnLService;
+  storage: InMemoryPositionCapStorage;
+  priceProvider: InMemoryMarketPriceProvider;
+} {
+  const storage = new InMemoryPositionCapStorage();
+  const priceProvider = new InMemoryMarketPriceProvider();
+  const service = new UnrealizedPnLService(storage, priceProvider, config, events);
+  return { service, storage, priceProvider };
 }

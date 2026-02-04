@@ -286,6 +286,167 @@ describe('PositionCapService', () => {
       expect(result.allowed).toBe(true);
       expect(result.caps.some(c => c.wouldExceedSoft)).toBe(true);
     });
+
+    describe('configured caps', () => {
+      it('should check ABSOLUTE configured cap', async () => {
+        await service.setCap(CapType.ABSOLUTE, 500, 800, marketId);
+
+        const result = await service.checkCaps({
+          marketId,
+          side: 'yes',
+          quantity: 600,
+          price: 0.50,
+        });
+
+        const absCap = result.caps.find(c => c.softLimit === 500 && c.hardLimit === 800);
+        expect(absCap).toBeDefined();
+        expect(absCap!.wouldExceedSoft).toBe(true);
+        expect(absCap!.current).toBe(0);
+      });
+
+      it('should block when ABSOLUTE configured cap hard limit exceeded', async () => {
+        await service.setCap(CapType.ABSOLUTE, 500, 800, marketId);
+
+        const result = await service.checkCaps({
+          marketId,
+          side: 'yes',
+          quantity: 900,
+          price: 0.50,
+        });
+
+        expect(result.allowed).toBe(false);
+        expect(result.reason).toContain('absolute');
+        expect(events.onHardLimitBlocked).toHaveBeenCalled();
+      });
+
+      it('should check PERCENTAGE configured cap', async () => {
+        // Set portfolio value so percentage calculation works
+        await storage.setPortfolioValue(10000);
+        await service.setCap(CapType.PERCENTAGE, 0.05, 0.10, marketId);
+
+        const result = await service.checkCaps({
+          marketId,
+          side: 'yes',
+          quantity: 800,
+          price: 0.50,
+        });
+
+        // notionalValue = 800 * 0.50 = 400, portfolioValue = 10000
+        // newValue = 400 / 10000 = 0.04
+        const pctCap = result.caps.find(c => c.type === CapType.PERCENTAGE);
+        expect(pctCap).toBeDefined();
+        expect(pctCap!.wouldExceedSoft).toBe(false); // 0.04 < 0.05
+      });
+
+      it('should block when PERCENTAGE cap hard limit exceeded', async () => {
+        await storage.setPortfolioValue(1000);
+        await service.setCap(CapType.PERCENTAGE, 0.05, 0.10, marketId);
+
+        const result = await service.checkCaps({
+          marketId,
+          side: 'yes',
+          quantity: 500,
+          price: 0.50,
+        });
+
+        // notionalValue = 500 * 0.50 = 250, portfolioValue = 1000
+        // newValue = 250 / 1000 = 0.25 > 0.10
+        expect(result.allowed).toBe(false);
+      });
+
+      it('should check NOTIONAL configured cap', async () => {
+        await service.setCap(CapType.NOTIONAL, 200, 400, marketId);
+
+        const result = await service.checkCaps({
+          marketId,
+          side: 'yes',
+          quantity: 300,
+          price: 0.50,
+        });
+
+        // notionalValue = 300 * 0.50 = 150, under soft limit
+        const notionalCap = result.caps.find(c => c.type === CapType.NOTIONAL && c.softLimit === 200);
+        expect(notionalCap).toBeDefined();
+        expect(notionalCap!.wouldExceedSoft).toBe(false);
+      });
+
+      it('should block when NOTIONAL cap hard limit exceeded', async () => {
+        await service.setCap(CapType.NOTIONAL, 200, 400, marketId);
+
+        const result = await service.checkCaps({
+          marketId,
+          side: 'yes',
+          quantity: 500,
+          price: 1.00,
+        });
+
+        // notionalValue = 500 * 1.00 = 500 > 400
+        expect(result.allowed).toBe(false);
+        expect(result.reason).toContain('notional');
+      });
+
+      it('should fire onSoftLimitWarning when soft limit exceeded', async () => {
+        await service.setCap(CapType.ABSOLUTE, 100, 800, marketId);
+
+        await service.checkCaps({
+          marketId,
+          side: 'yes',
+          quantity: 200,
+          price: 0.50,
+        });
+
+        expect(events.onSoftLimitWarning).toHaveBeenCalled();
+      });
+
+      it('should fire onHardLimitBlocked when hard limit exceeded', async () => {
+        await service.setCap(CapType.ABSOLUTE, 100, 200, marketId);
+
+        await service.checkCaps({
+          marketId,
+          side: 'yes',
+          quantity: 300,
+          price: 0.50,
+        });
+
+        expect(events.onHardLimitBlocked).toHaveBeenCalled();
+      });
+
+      it('should skip inactive caps', async () => {
+        const cap = await service.setCap(CapType.ABSOLUTE, 10, 20, marketId);
+        // Mark cap as inactive
+        cap.isActive = false;
+        await storage.upsertCap(cap);
+
+        const result = await service.checkCaps({
+          marketId,
+          side: 'yes',
+          quantity: 100,
+          price: 0.50,
+        });
+
+        // Should only have market-level caps, not the inactive configured one
+        const inactiveCap = result.caps.find(c => c.softLimit === 10 && c.hardLimit === 20);
+        expect(inactiveCap).toBeUndefined();
+      });
+
+      it('should check global caps alongside market caps', async () => {
+        // Create a global cap (no marketId)
+        await service.setCap(CapType.ABSOLUTE, 400, 600);
+
+        const result = await service.checkCaps({
+          marketId,
+          side: 'yes',
+          quantity: 500,
+          price: 0.50,
+        });
+
+        // Should have market-level caps + global cap
+        expect(result.caps.length).toBeGreaterThanOrEqual(3);
+        const globalCap = result.caps.find(c => c.softLimit === 400 && c.hardLimit === 600);
+        expect(globalCap).toBeDefined();
+        expect(globalCap!.wouldExceedSoft).toBe(true);
+      });
+    });
   });
 
   describe('updatePosition', () => {

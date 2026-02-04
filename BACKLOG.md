@@ -80,12 +80,13 @@
 | 21 | 2026-02-04 | Quality | Structured logging in all API routes (10 routes, handleApiError utility) |
 | 22 | 2026-02-04 | Quality | Request/response logging in Kalshi API client with timing metrics |
 | 23 | 2026-02-04 | Reliability | Rate limiter with Retry-After parsing and proactive request throttle |
+| 24 | 2026-02-04 | Testing | PositionCapService configured caps tests (12 new, 78.7% → ~95%) |
 
 ---
 
 ## Statistics
 
-- **Total Tests**: 817 (all passing)
+- **Total Tests**: 827 (all passing)
 - **Coverage**: ~89% statements
 - **Key Improvements**:
   - kalshi.ts: 3.41% → 82.35% (+79%)
