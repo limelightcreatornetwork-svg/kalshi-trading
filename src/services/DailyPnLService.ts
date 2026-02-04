@@ -51,36 +51,6 @@ export interface PnLStorage {
   getRange(startDate: string, endDate: string): Promise<DailyPnL[]>;
 }
 
-// In-memory storage for testing
-export class InMemoryPnLStorage implements PnLStorage {
-  private records: Map<string, DailyPnL> = new Map();
-
-  async getByDate(date: string): Promise<DailyPnL | null> {
-    return this.records.get(date) ?? null;
-  }
-
-  async create(pnl: DailyPnL): Promise<void> {
-    this.records.set(pnl.date, pnl);
-  }
-
-  async update(date: string, updates: Partial<DailyPnL>): Promise<void> {
-    const existing = this.records.get(date);
-    if (existing) {
-      this.records.set(date, { ...existing, ...updates, updatedAt: new Date() });
-    }
-  }
-
-  async getRange(startDate: string, endDate: string): Promise<DailyPnL[]> {
-    return Array.from(this.records.values())
-      .filter(r => r.date >= startDate && r.date <= endDate)
-      .sort((a, b) => a.date.localeCompare(b.date));
-  }
-
-  clear(): void {
-    this.records.clear();
-  }
-}
-
 export interface DailyPnLServiceConfig {
   maxDailyLoss: number;       // Max loss before kill switch
   maxDrawdown: number;        // Max drawdown % before kill switch
@@ -381,10 +351,3 @@ export class DailyPnLService {
   }
 }
 
-// Factory function
-export function createDailyPnLService(
-  config: Partial<DailyPnLServiceConfig> = {},
-  events: DailyPnLServiceEvents = {}
-): DailyPnLService {
-  return new DailyPnLService(new InMemoryPnLStorage(), config, events);
-}

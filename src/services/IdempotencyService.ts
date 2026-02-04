@@ -25,55 +25,6 @@ export interface IdempotencyStorage {
   cleanup(): Promise<number>; // Returns count of deleted expired records
 }
 
-// In-memory storage for testing
-export class InMemoryIdempotencyStorage implements IdempotencyStorage {
-  private records: Map<string, IdempotencyRecord> = new Map();
-
-  async get(key: string): Promise<IdempotencyRecord | null> {
-    const record = this.records.get(key);
-    if (!record) return null;
-    
-    // Check expiry
-    if (record.expiresAt < new Date()) {
-      this.records.delete(key);
-      return null;
-    }
-    
-    return record;
-  }
-
-  async set(record: IdempotencyRecord): Promise<void> {
-    this.records.set(record.key, record);
-  }
-
-  async delete(key: string): Promise<void> {
-    this.records.delete(key);
-  }
-
-  async cleanup(): Promise<number> {
-    const now = new Date();
-    let deleted = 0;
-    
-    for (const [key, record] of this.records) {
-      if (record.expiresAt < now) {
-        this.records.delete(key);
-        deleted++;
-      }
-    }
-    
-    return deleted;
-  }
-
-  // For testing
-  clear(): void {
-    this.records.clear();
-  }
-
-  size(): number {
-    return this.records.size;
-  }
-}
-
 export interface IdempotencyServiceConfig {
   ttlMs: number; // How long idempotency records are valid
   hashAlgorithm: string;
@@ -270,9 +221,3 @@ export class IdempotencyConflictError extends Error {
   }
 }
 
-// Factory function with default in-memory storage
-export function createIdempotencyService(
-  config: Partial<IdempotencyServiceConfig> = {}
-): IdempotencyService {
-  return new IdempotencyService(new InMemoryIdempotencyStorage(), config);
-}

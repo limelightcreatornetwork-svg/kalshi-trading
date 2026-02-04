@@ -1,148 +1,148 @@
 import { NextResponse } from 'next/server';
-import { getBalance, getPositions, Market as KalshiMarket } from '@/lib/kalshi';
+import { getBalance, getPositions } from '@/lib/kalshi';
+import { withAuth } from '@/lib/api-auth';
+import { getDailyPnLService, getKillSwitchService } from '@/lib/service-factories';
 
-// Risk data aggregation endpoint
-export async function GET() {
+const DEFAULT_LIMITS = {
+  maxDailyLoss: 500,
+  maxDrawdown: 10,
+  maxPositionSize: 100,
+  maxExposure: 5000,
+};
+
+export const GET = withAuth(async function GET() {
   try {
-    // Fetch real data from Kalshi
     const [balanceData, positionsData] = await Promise.all([
       getBalance().catch(() => null),
       getPositions().catch(() => null),
     ]);
 
-    // Calculate exposure from positions
     const positions = positionsData?.market_positions || [];
     const totalExposure = positions.reduce((sum, p) => sum + Math.abs(p.market_exposure), 0);
-    const realizedPnl = positions.reduce((sum, p) => sum + p.realized_pnl, 0);
-    
-    // Group positions by category (using first part of ticker as proxy)
+
     const exposureByCategory: Record<string, number> = {};
     positions.forEach((p) => {
       const category = p.ticker.split('-')[0] || 'Other';
       exposureByCategory[category] = (exposureByCategory[category] || 0) + Math.abs(p.market_exposure);
     });
 
-    // Calculate position limits
-    const maxPositionSize = 100; // contracts
-    const maxPositions = positions.map((p) => ({
-      ticker: p.ticker,
-      current: Math.abs(p.position),
-      max: maxPositionSize,
-      utilization: Math.min(100, (Math.abs(p.position) / maxPositionSize) * 100),
-    }));
+    let marketLimits = new Map<string, number>();
+    try {
+      const { requirePrisma } = await import('@/lib/prisma');
+      const prisma = requirePrisma();
+      const tickers = positions.map((p) => p.ticker);
+      if (tickers.length > 0) {
+        const markets = await prisma.market.findMany({
+          where: { externalId: { in: tickers } },
+          select: { externalId: true, maxPositionSize: true },
+        });
+        marketLimits = new Map(
+          markets.map((m) => [m.externalId, Number(m.maxPositionSize)])
+        );
+      }
+    } catch {
+      // No DB configured or market records missing
+    }
 
-    // Calculate margin utilization
+    const positionLimits = positions.map((p) => {
+      const maxPositionSize = marketLimits.get(p.ticker) ?? DEFAULT_LIMITS.maxPositionSize;
+      return {
+        ticker: p.ticker,
+        current: Math.abs(p.position),
+        max: maxPositionSize,
+        utilization: maxPositionSize > 0 ? Math.min(100, (Math.abs(p.position) / maxPositionSize) * 100) : 0,
+      };
+    });
+
     const portfolioValue = balanceData?.portfolio_value || 0;
     const balance = balanceData?.balance || 0;
     const marginUsed = portfolioValue - balance;
     const marginUtilization = portfolioValue > 0 ? (marginUsed / portfolioValue) * 100 : 0;
 
-    // Risk summary
+    let todayPnL;
+    try {
+      todayPnL = await getDailyPnLService().getTodayPnL();
+    } catch {
+      todayPnL = null;
+    }
+
+    const realizedPnl = todayPnL?.realizedPnl ?? positions.reduce((sum, p) => sum + p.realized_pnl, 0) / 100;
+    const dailyUsed = Math.abs(realizedPnl);
+
+    let killSwitch = {
+      enabled: true,
+      status: 'active',
+      triggeredAt: null as string | null,
+      reason: null as string | null,
+    };
+
+    try {
+      const activeKillSwitches = await getKillSwitchService().getActive();
+      if (activeKillSwitches.length > 0) {
+        killSwitch = {
+          enabled: false,
+          status: 'triggered',
+          triggeredAt: activeKillSwitches[0].triggeredAt.toISOString(),
+          reason: activeKillSwitches[0].reason,
+        };
+      }
+    } catch {
+      // Ignore kill switch errors
+    }
+
+    const warnings: string[] = [];
+    if (marginUtilization > 70) {
+      warnings.push(`Margin utilization at ${marginUtilization.toFixed(0)}%`);
+    }
+    if (totalExposure / 100 > DEFAULT_LIMITS.maxExposure * 0.8) {
+      warnings.push('Total exposure approaching limit');
+    }
+    if (dailyUsed > DEFAULT_LIMITS.maxDailyLoss * 0.8) {
+      warnings.push('Daily loss approaching limit');
+    }
+
     const riskData = {
-      // Overall status
-      isSafe: marginUtilization < 80 && totalExposure < 5000,
-      
-      // Kill switch (mock - would come from service)
-      killSwitch: {
-        enabled: true,
-        status: 'active',
-        triggeredAt: null,
-        reason: null,
-      },
-      
-      // Exposure metrics
+      isSafe:
+        killSwitch.enabled &&
+        marginUtilization < 80 &&
+        totalExposure / 100 < DEFAULT_LIMITS.maxExposure &&
+        dailyUsed < DEFAULT_LIMITS.maxDailyLoss,
+      killSwitch,
       exposure: {
-        total: totalExposure / 100, // Convert from cents to dollars
+        total: totalExposure / 100,
         byCategory: Object.entries(exposureByCategory).map(([category, amount]) => ({
           category,
           amount: amount / 100,
           percentage: totalExposure > 0 ? (amount / totalExposure) * 100 : 0,
         })),
       },
-      
-      // Position limits
-      positionLimits: maxPositions.slice(0, 10), // Top 10
-      
-      // Margin
+      positionLimits: positionLimits.slice(0, 10),
       margin: {
         used: marginUsed / 100,
         available: balance / 100,
         total: portfolioValue / 100,
         utilization: marginUtilization,
       },
-      
-      // P&L (Note: realized P&L from positions; unrealized would require cost basis calculation)
       pnl: {
-        realized: realizedPnl / 100,
-        unrealized: 0, // TODO: Calculate from position value vs cost basis
-        dailyLimit: 500,
-        dailyUsed: Math.abs(realizedPnl) / 100,
-        dailyUtilization: Math.min(100, (Math.abs(realizedPnl) / 50000) * 100),
+        realized: realizedPnl,
+        unrealized: todayPnL?.unrealizedPnl ?? 0,
+        dailyLimit: DEFAULT_LIMITS.maxDailyLoss,
+        dailyUsed,
+        dailyUtilization: DEFAULT_LIMITS.maxDailyLoss > 0
+          ? Math.min(100, (dailyUsed / DEFAULT_LIMITS.maxDailyLoss) * 100)
+          : 0,
       },
-      
-      // Risk limits
-      limits: {
-        maxDailyLoss: 500,
-        maxDrawdown: 10, // percentage
-        maxPositionSize: maxPositionSize,
-        maxExposure: 5000,
-      },
-      
-      // Warnings
-      warnings: [] as string[],
-      
-      // Last updated
+      limits: DEFAULT_LIMITS,
+      warnings,
       lastUpdated: new Date().toISOString(),
     };
-
-    // Generate warnings
-    if (marginUtilization > 70) {
-      riskData.warnings.push(`Margin utilization at ${marginUtilization.toFixed(0)}%`);
-    }
-    if (totalExposure / 100 > 4000) {
-      riskData.warnings.push(`Total exposure approaching limit`);
-    }
 
     return NextResponse.json(riskData);
   } catch (error) {
     console.error('Risk API error:', error);
-    
-    // Return mock data if API fails
-    return NextResponse.json({
-      isSafe: true,
-      killSwitch: {
-        enabled: true,
-        status: 'active',
-        triggeredAt: null,
-        reason: null,
-      },
-      exposure: {
-        total: 0,
-        byCategory: [],
-      },
-      positionLimits: [],
-      margin: {
-        used: 0,
-        available: 0,
-        total: 0,
-        utilization: 0,
-      },
-      pnl: {
-        realized: 0,
-        unrealized: 0,
-        dailyLimit: 500,
-        dailyUsed: 0,
-        dailyUtilization: 0,
-      },
-      limits: {
-        maxDailyLoss: 500,
-        maxDrawdown: 10,
-        maxPositionSize: 100,
-        maxExposure: 5000,
-      },
-      warnings: [],
-      lastUpdated: new Date().toISOString(),
-      error: 'Failed to fetch live data',
-    });
+    return NextResponse.json(
+      { error: 'Failed to fetch live data' },
+      { status: 500 }
+    );
   }
-}
+});

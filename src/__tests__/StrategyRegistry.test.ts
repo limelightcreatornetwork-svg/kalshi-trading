@@ -3,7 +3,6 @@ import {
   StrategyRegistry,
   StrategyRegistryConfig,
   StrategyRegistryEvents,
-  createStrategyRegistry,
 } from '../services/StrategyRegistry';
 import {
   Strategy,
@@ -20,7 +19,8 @@ import {
   SignalStatus,
 } from '../types/strategy';
 import { Thesis, ThesisStatus } from '../types/thesis';
-import { KillSwitchService, InMemoryKillSwitchStorage } from '../services/KillSwitchService';
+import { KillSwitchService } from '../services/KillSwitchService';
+import { createStrategyRegistry, InMemoryKillSwitchStorage } from './helpers/test-factories';
 import { KillSwitchLevel, KillSwitchReason } from '../types/killswitch';
 
 // Create a mock strategy implementation

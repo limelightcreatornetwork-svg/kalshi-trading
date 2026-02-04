@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getMarkets } from '@/lib/kalshi';
 import { createForecastingService } from '@/services/ForecastingService';
+import { handleApiError } from '@/lib/api-utils';
 import type { ForecastingConfig } from '@/types/forecasting';
+import { withAuth } from '@/lib/api-auth';
 
 // Create service instance with default config
 function getService(config: Partial<ForecastingConfig> = {}) {
@@ -14,14 +16,14 @@ function getService(config: Partial<ForecastingConfig> = {}) {
 /**
  * GET /api/forecasting - Get forecasting summary and opportunities
  */
-export async function GET(request: NextRequest) {
+export const GET = withAuth(async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams;
     const modelId = searchParams.get('model') || 'ensemble-v1';
     const minEdge = Number(searchParams.get('minEdge')) || 0.03;
     const bankroll = Number(searchParams.get('bankroll')) || 1000;
     const limit = Math.min(Number(searchParams.get('limit')) || 100, 500);
-    
+
     const service = getService({
       modelId,
       minEdgeToTrade: minEdge,
@@ -29,9 +31,9 @@ export async function GET(request: NextRequest) {
     });
 
     // Fetch markets from Kalshi
-    const { markets } = await getMarkets({ 
-      limit, 
-      status: 'open' 
+    const { markets } = await getMarkets({
+      limit,
+      status: 'open'
     });
 
     // Generate summary with opportunities
@@ -50,25 +52,18 @@ export async function GET(request: NextRequest) {
       },
     });
   } catch (error) {
-    console.error('Forecasting error:', error);
-    return NextResponse.json(
-      {
-        success: false,
-        error: error instanceof Error ? error.message : 'Forecasting failed',
-      },
-      { status: 500 }
-    );
+    return handleApiError(error, 'Forecasting failed');
   }
-}
+});
 
 /**
  * POST /api/forecasting - Generate forecast for specific market(s)
  */
-export async function POST(request: NextRequest) {
+export const POST = withAuth(async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { 
-      tickers, 
+    const {
+      tickers,
       modelId = 'ensemble-v1',
       bankroll = 1000,
       minEdge = 0.03,
@@ -117,13 +112,6 @@ export async function POST(request: NextRequest) {
       },
     });
   } catch (error) {
-    console.error('Forecasting error:', error);
-    return NextResponse.json(
-      {
-        success: false,
-        error: error instanceof Error ? error.message : 'Forecasting failed',
-      },
-      { status: 500 }
-    );
+    return handleApiError(error, 'Forecasting failed');
   }
-}
+});

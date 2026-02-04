@@ -8,6 +8,7 @@
 import { NextResponse } from 'next/server';
 import { NextRequest } from 'next/server';
 import { getMarkets, KalshiApiError, Market } from '@/lib/kalshi';
+import { withAuth } from '@/lib/api-auth';
 
 interface MarketWithArbitrage {
   ticker: string;
@@ -63,7 +64,7 @@ function analyzeMarket(market: Market): MarketWithArbitrage {
   };
 }
 
-export async function GET(request: NextRequest) {
+export const GET = withAuth(async function GET(request: NextRequest) {
   const startTime = Date.now();
   
   // Parse query params
@@ -165,4 +166,4 @@ export async function GET(request: NextRequest) {
       { status: 500 }
     );
   }
-}
+});

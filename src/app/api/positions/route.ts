@@ -1,11 +1,13 @@
 // GET /api/positions - Get current positions
 import { NextRequest, NextResponse } from 'next/server';
-import { getPositions, KalshiApiError } from '@/lib/kalshi';
+import { getPositions } from '@/lib/kalshi';
+import { handleApiError } from '@/lib/api-utils';
+import { withAuth } from '@/lib/api-auth';
 
-export async function GET(request: NextRequest) {
+export const GET = withAuth(async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams;
-    
+
     const params = {
       limit: searchParams.get('limit') ? parseInt(searchParams.get('limit')!) : 100,
       cursor: searchParams.get('cursor') || undefined,
@@ -13,9 +15,9 @@ export async function GET(request: NextRequest) {
       event_ticker: searchParams.get('event_ticker') || undefined,
       settlement_status: searchParams.get('settlement_status') || undefined,
     };
-    
+
     const response = await getPositions(params);
-    
+
     // Transform market positions
     const marketPositions = response.market_positions.map(pos => ({
       ticker: pos.ticker,
@@ -31,7 +33,7 @@ export async function GET(request: NextRequest) {
       feesPaidDollars: (pos.fees_paid / 100).toFixed(2),
       lastUpdatedAt: pos.last_updated_ts,
     }));
-    
+
     // Transform event positions
     const eventPositions = response.event_positions.map(pos => ({
       eventTicker: pos.event_ticker,
@@ -44,7 +46,7 @@ export async function GET(request: NextRequest) {
       feesPaid: pos.fees_paid,
       feesPaidDollars: (pos.fees_paid / 100).toFixed(2),
     }));
-    
+
     return NextResponse.json({
       success: true,
       data: {
@@ -56,18 +58,6 @@ export async function GET(request: NextRequest) {
       },
     });
   } catch (error) {
-    console.error('Positions API error:', error);
-    
-    if (error instanceof KalshiApiError) {
-      return NextResponse.json(
-        { success: false, error: error.apiMessage },
-        { status: error.statusCode }
-      );
-    }
-    
-    return NextResponse.json(
-      { success: false, error: 'Failed to fetch positions' },
-      { status: 500 }
-    );
+    return handleApiError(error, 'Failed to fetch positions');
   }
-}
+});

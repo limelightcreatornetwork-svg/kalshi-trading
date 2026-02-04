@@ -8,8 +8,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { analyticsService } from '../history/route';
 import type { StatsTimeFilter } from '@/services/AnalyticsService';
+import { withAuth } from '@/lib/api-auth';
 
-export async function GET(request: NextRequest) {
+export const GET = withAuth(async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams;
     const periodParam = searchParams.get('period') ?? 'all';
@@ -133,4 +134,4 @@ export async function GET(request: NextRequest) {
       { status: 500 }
     );
   }
-}
+});

@@ -1,10 +1,10 @@
 import { NextResponse } from 'next/server';
 import { getBalance, getPositions, getOrders } from '@/lib/kalshi';
+import { withAuth } from '@/lib/api-auth';
+import { getDailyPnLService } from '@/lib/service-factories';
 
-// Performance data aggregation endpoint
-export async function GET() {
+export const GET = withAuth(async function GET() {
   try {
-    // Fetch real data from Kalshi
     const [balanceData, positionsData, ordersData] = await Promise.all([
       getBalance().catch(() => null),
       getPositions().catch(() => null),
@@ -14,156 +14,135 @@ export async function GET() {
     const positions = positionsData?.market_positions || [];
     const orders = ordersData?.orders || [];
 
-    // Calculate P&L
     const totalRealizedPnl = positions.reduce((sum, p) => sum + p.realized_pnl, 0) / 100;
-    const totalUnrealizedPnl = positions.reduce((sum, p) => sum + p.market_exposure, 0) / 100;
     const totalFees = positions.reduce((sum, p) => sum + p.fees_paid, 0) / 100;
 
-    // Calculate win/loss from orders
-    // TODO: This is placeholder logic - proper win/loss requires tracking actual P&L per trade
-    // which would need position cost basis and settlement data from the trading service
-    const filledOrders = orders.filter(o => o.status === 'executed' || o.fill_count > 0);
-    // For now, estimate based on a reasonable distribution while we don't have per-trade P&L
-    const estimatedWinRate = 0.52; // Slightly better than random
-    const wins = Math.round(filledOrders.length * estimatedWinRate);
-    const losses = filledOrders.length - wins;
-    const winRate = filledOrders.length > 0 ? estimatedWinRate * 100 : 0;
+    let dailyPnl = [] as Array<{
+      date: string;
+      realizedPnl: number;
+      unrealizedPnl: number;
+      fees: number;
+      netPnl: number;
+      cumulative: number;
+    }>;
+    let totalWins = 0;
+    let totalLosses = 0;
+    let totalRecordedTrades = 0;
 
-    // Calculate average edge (mock - would need thesis service)
-    const avgEdge = 2.5; // cents
+    try {
+      const end = new Date();
+      const start = new Date();
+      start.setDate(end.getDate() - 30);
+      const records = await getDailyPnLService().getRange(
+        start.toISOString().split('T')[0],
+        end.toISOString().split('T')[0]
+      );
 
-    // Generate daily P&L data (last 30 days)
-    const dailyPnl = generateDailyPnlData(totalRealizedPnl, 30);
-    
-    // Calculate metrics
-    const returns = dailyPnl.map(d => d.netPnl);
+      records.forEach((record) => {
+        totalWins += record.winCount;
+        totalLosses += record.lossCount;
+        totalRecordedTrades += record.tradesCount;
+      });
+
+      let cumulative = 0;
+      dailyPnl = records.map((record) => {
+        cumulative += record.netPnl;
+        return {
+          date: record.date,
+          realizedPnl: record.realizedPnl,
+          unrealizedPnl: record.unrealizedPnl,
+          fees: record.fees,
+          netPnl: record.netPnl,
+          cumulative,
+        };
+      });
+    } catch {
+      dailyPnl = [];
+    }
+
+    if (dailyPnl.length === 0) {
+      dailyPnl = [
+        {
+          date: new Date().toISOString().split('T')[0],
+          realizedPnl: 0,
+          unrealizedPnl: 0,
+          fees: 0,
+          netPnl: 0,
+          cumulative: 0,
+        },
+      ];
+    }
+
+    const returns = dailyPnl.map((d) => d.netPnl);
     const sharpeRatio = calculateSharpeRatio(returns);
     const maxDrawdown = calculateMaxDrawdown(returns);
+    const volatility = calculateVolatility(returns);
 
-    // Strategy performance (mock - would come from strategy service)
-    const strategies = [
-      { name: 'Value', pnl: totalRealizedPnl * 0.4, trades: Math.floor(filledOrders.length * 0.4), winRate: 55 },
-      { name: 'News', pnl: totalRealizedPnl * 0.3, trades: Math.floor(filledOrders.length * 0.3), winRate: 48 },
-      { name: 'Arbitrage', pnl: totalRealizedPnl * 0.3, trades: Math.floor(filledOrders.length * 0.3), winRate: 92 },
-    ];
+    const filledOrderCount = orders.filter((o) => o.status === 'executed' || o.fill_count > 0).length;
+    const totalTrades = totalRecordedTrades || filledOrderCount;
+    const wins = totalRecordedTrades ? totalWins : 0;
+    const losses = totalRecordedTrades ? totalLosses : 0;
+    const winRate = totalTrades > 0 ? (wins / totalTrades) * 100 : 0;
 
-    // Recent trades with thesis (mock thesis data)
-    const recentTrades = filledOrders.slice(0, 10).map((o, i) => ({
-      id: o.order_id,
-      ticker: o.ticker,
-      side: o.side,
-      action: o.action,
-      quantity: o.fill_count,
-      price: (o.yes_price || o.no_price) / 100,
-      pnl: ((Math.random() - 0.3) * 20).toFixed(2),
-      thesis: getThesisForTrade(o.ticker),
-      timestamp: o.created_time,
-    }));
+    const recentTrades = orders
+      .filter((o) => o.status === 'executed' || o.fill_count > 0)
+      .slice(0, 10)
+      .map((o) => ({
+        id: o.order_id,
+        ticker: o.ticker,
+        side: o.side,
+        action: o.action,
+        quantity: o.fill_count,
+        price: (o.yes_price || o.no_price) / 100,
+        pnl: '0.00',
+        thesis: getThesisForTrade(o.ticker),
+        timestamp: o.created_time,
+      }));
+
+    const totalUnrealizedPnl = 0;
+    const summaryTotal = totalRealizedPnl + totalUnrealizedPnl - totalFees;
 
     const performanceData = {
-      // Summary
       summary: {
-        totalPnl: totalRealizedPnl + totalUnrealizedPnl - totalFees,
+        totalPnl: summaryTotal,
         realizedPnl: totalRealizedPnl,
         unrealizedPnl: totalUnrealizedPnl,
         fees: totalFees,
         portfolioValue: (balanceData?.portfolio_value || 0) / 100,
       },
-
-      // Win rate and edge
-      winRate: winRate,
-      avgEdge: avgEdge,
-      totalTrades: filledOrders.length,
-      wins: wins,
-      losses: losses,
-
-      // Daily P&L chart data
-      dailyPnl: dailyPnl,
-
-      // Period summaries
+      winRate,
+      avgEdge: 0,
+      totalTrades,
+      wins,
+      losses,
+      dailyPnl,
       periods: {
         daily: dailyPnl[dailyPnl.length - 1]?.netPnl || 0,
         weekly: dailyPnl.slice(-7).reduce((sum, d) => sum + d.netPnl, 0),
         monthly: dailyPnl.reduce((sum, d) => sum + d.netPnl, 0),
       },
-
-      // Risk metrics
       metrics: {
-        sharpeRatio: sharpeRatio,
-        maxDrawdown: maxDrawdown,
-        volatility: calculateVolatility(returns),
+        sharpeRatio,
+        maxDrawdown,
+        volatility,
         avgDailyReturn: returns.length > 0 ? returns.reduce((a, b) => a + b, 0) / returns.length : 0,
       },
-
-      // Strategy breakdown
-      strategies: strategies,
-
-      // Recent trades
-      recentTrades: recentTrades,
-
-      // Last updated
+      strategies: [],
+      recentTrades,
       lastUpdated: new Date().toISOString(),
     };
 
     return NextResponse.json(performanceData);
   } catch (error) {
     console.error('Performance API error:', error);
-    
-    // Return mock data if API fails
-    return NextResponse.json({
-      summary: {
-        totalPnl: 0,
-        realizedPnl: 0,
-        unrealizedPnl: 0,
-        fees: 0,
-        portfolioValue: 0,
-      },
-      winRate: 0,
-      avgEdge: 0,
-      totalTrades: 0,
-      wins: 0,
-      losses: 0,
-      dailyPnl: [],
-      periods: { daily: 0, weekly: 0, monthly: 0 },
-      metrics: {
-        sharpeRatio: 0,
-        maxDrawdown: 0,
-        volatility: 0,
-        avgDailyReturn: 0,
-      },
-      strategies: [],
-      recentTrades: [],
-      lastUpdated: new Date().toISOString(),
-      error: 'Failed to fetch live data',
-    });
+    return NextResponse.json(
+      { error: 'Failed to fetch live data' },
+      { status: 500 }
+    );
   }
-}
+});
 
 // Helper functions
-function generateDailyPnlData(totalPnl: number, days: number) {
-  const data = [];
-  let cumulative = 0;
-  const dailyAvg = totalPnl / days;
-
-  for (let i = days - 1; i >= 0; i--) {
-    const date = new Date();
-    date.setDate(date.getDate() - i);
-    const dailyPnl = dailyAvg + (Math.random() - 0.5) * dailyAvg * 2;
-    cumulative += dailyPnl;
-
-    data.push({
-      date: date.toISOString().split('T')[0],
-      realizedPnl: dailyPnl * 0.8,
-      unrealizedPnl: dailyPnl * 0.2,
-      fees: Math.abs(dailyPnl) * 0.02,
-      netPnl: dailyPnl,
-      cumulative: cumulative,
-    });
-  }
-
-  return data;
-}
-
 function calculateSharpeRatio(returns: number[]): number {
   if (returns.length < 2) return 0;
   const mean = returns.reduce((a, b) => a + b, 0) / returns.length;
@@ -198,15 +177,15 @@ function calculateVolatility(returns: number[]): number {
 
 function getThesisForTrade(ticker: string): string {
   const theses: Record<string, string> = {
-    'KXBTC': 'BTC momentum breakout above resistance',
-    'KXETH': 'ETH undervalued relative to BTC ratio',
-    'KXSPY': 'Market overreaction to Fed commentary',
-    'KXFED': 'High probability of rate hold based on CPI',
+    KXBTC: 'BTC thesis tracked in strategy notes',
+    KXETH: 'ETH thesis tracked in strategy notes',
+    KXSPY: 'SPY thesis tracked in strategy notes',
+    KXFED: 'Fed thesis tracked in strategy notes',
   };
-  
+
   for (const [key, thesis] of Object.entries(theses)) {
     if (ticker.includes(key)) return thesis;
   }
-  
-  return 'Model-generated signal with 2+ edge';
+
+  return 'No thesis data recorded';
 }

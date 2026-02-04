@@ -510,9 +510,3 @@ export class PreTradeCheckService {
   }
 }
 
-// Factory function
-export function createPreTradeCheckService(
-  config: Partial<PreTradeCheckConfig> = {}
-): PreTradeCheckService {
-  return new PreTradeCheckService(config);
-}

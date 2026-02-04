@@ -3,13 +3,6 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import {
-  createThesisService,
-  createKillSwitchService,
-  createPositionCapService,
-  createIdempotencyService,
-  createDailyPnLService,
-  createPreTradeCheckService,
-  createStrategyRegistry,
   OrderStateMachine,
   ThesisService,
   KillSwitchService,
@@ -19,6 +12,15 @@ import {
   PreTradeCheckService,
   StrategyRegistry,
 } from '../../services';
+import {
+  createThesisService,
+  createKillSwitchService,
+  createPositionCapService,
+  createIdempotencyService,
+  createDailyPnLService,
+  createPreTradeCheckService,
+  createStrategyRegistry,
+} from '../helpers/test-factories';
 import { ThesisStatus } from '../../types/thesis';
 import { KillSwitchLevel, KillSwitchReason } from '../../types/killswitch';
 import { OrderStatus, OrderSide, OrderType, TimeInForce } from '../../types/order';

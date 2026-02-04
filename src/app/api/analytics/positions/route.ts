@@ -7,8 +7,9 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { analyticsService, tradeStorage } from '../history/route';
+import { withAuth } from '@/lib/api-auth';
 
-export async function GET(request: NextRequest) {
+export const GET = withAuth(async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams;
     const includeClosed = searchParams.get('includeClosed') !== 'false';
@@ -78,10 +79,10 @@ export async function GET(request: NextRequest) {
       { status: 500 }
     );
   }
-}
+});
 
 // POST to record a new trade
-export async function POST(request: NextRequest) {
+export const POST = withAuth(async function POST(request: NextRequest) {
   try {
     const body = await request.json();
 
@@ -139,10 +140,10 @@ export async function POST(request: NextRequest) {
       { status: 500 }
     );
   }
-}
+});
 
 // PATCH to update or close a trade
-export async function PATCH(request: NextRequest) {
+export const PATCH = withAuth(async function PATCH(request: NextRequest) {
   try {
     const body = await request.json();
 
@@ -241,4 +242,4 @@ export async function PATCH(request: NextRequest) {
       { status: 500 }
     );
   }
-}
+});

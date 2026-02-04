@@ -2,10 +2,9 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import {
   PositionCapService,
-  InMemoryPositionCapStorage,
   PositionCapServiceEvents,
-  createPositionCapService,
 } from '../services/PositionCapService';
+import { InMemoryPositionCapStorage, createPositionCapService } from './helpers/test-factories';
 import {
   CapType,
   MarketStatus,

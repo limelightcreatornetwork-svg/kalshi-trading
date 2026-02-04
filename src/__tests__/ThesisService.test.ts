@@ -2,10 +2,9 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import {
   ThesisService,
-  InMemoryThesisStorage,
   ThesisServiceEvents,
-  createThesisService,
 } from '../services/ThesisService';
+import { InMemoryThesisStorage, createThesisService } from './helpers/test-factories';
 import { ThesisStatus } from '../types/thesis';
 
 describe('InMemoryThesisStorage', () => {

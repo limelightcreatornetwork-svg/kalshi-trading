@@ -2,23 +2,14 @@
 // POST /api/arbitrage/alerts - Configure alert settings
 
 import { NextRequest, NextResponse } from 'next/server';
+import { getArbitrageService, getPrisma, handleApiError } from '@/lib/api-utils';
+import { withAuth } from '@/lib/api-auth';
 
-// Dynamically import to avoid Prisma initialization at build time
-async function getArbitrageService() {
-  const { arbitrageService } = await import('@/services/ArbitrageService');
-  return arbitrageService;
-}
-
-async function getPrisma() {
-  const { requirePrisma } = await import('@/lib/prisma');
-  return requirePrisma();
-}
-
-export async function GET() {
+export const GET = withAuth(async function GET(_request: NextRequest) {
   try {
     const arbitrageService = await getArbitrageService();
     const alerts = await arbitrageService.checkAlerts();
-    
+
     return NextResponse.json({
       success: true,
       data: {
@@ -27,27 +18,22 @@ export async function GET() {
       },
     });
   } catch (error) {
-    console.error('Arbitrage alerts error:', error);
-    
-    return NextResponse.json(
-      { success: false, error: error instanceof Error ? error.message : 'Failed to check alerts' },
-      { status: 500 }
-    );
+    return handleApiError(error, 'Failed to check alerts');
   }
-}
+});
 
-export async function POST(request: NextRequest) {
+export const POST = withAuth(async function POST(request: NextRequest) {
   try {
     const prisma = await getPrisma();
     const body = await request.json();
-    
+
     const { minProfitCents, minProfitPercent, alertEnabled, webhookUrl } = body;
-    
+
     // Upsert alert config (we only keep one active config)
     const existing = await prisma.arbitrageAlertConfig.findFirst({
       where: { isActive: true },
     });
-    
+
     const config = existing
       ? await prisma.arbitrageAlertConfig.update({
           where: { id: existing.id },
@@ -66,7 +52,7 @@ export async function POST(request: NextRequest) {
             webhookUrl,
           },
         });
-    
+
     return NextResponse.json({
       success: true,
       data: {
@@ -78,11 +64,6 @@ export async function POST(request: NextRequest) {
       },
     });
   } catch (error) {
-    console.error('Arbitrage alerts config error:', error);
-    
-    return NextResponse.json(
-      { success: false, error: error instanceof Error ? error.message : 'Failed to configure alerts' },
-      { status: 500 }
-    );
+    return handleApiError(error, 'Failed to configure alerts');
   }
-}
+});

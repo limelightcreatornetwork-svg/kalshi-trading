@@ -29,69 +29,6 @@ export interface ThesisStorage {
   getPerformanceByModel(modelId: string): Promise<ThesisPerformance[]>;
 }
 
-// In-memory storage for testing
-export class InMemoryThesisStorage implements ThesisStorage {
-  private theses: Map<string, Thesis> = new Map();
-  private snapshots: Map<string, DataSnapshot> = new Map();
-  private performance: ThesisPerformance[] = [];
-
-  async getById(id: string): Promise<Thesis | null> {
-    return this.theses.get(id) ?? null;
-  }
-
-  async getByMarket(marketId: string): Promise<Thesis[]> {
-    return Array.from(this.theses.values()).filter(t => t.marketId === marketId);
-  }
-
-  async getActive(): Promise<Thesis[]> {
-    const now = new Date();
-    return Array.from(this.theses.values()).filter(t => {
-      if (t.status !== ThesisStatus.ACTIVE) return false;
-      if (t.expiresAt && t.expiresAt < now) return false;
-      return true;
-    });
-  }
-
-  async getActiveForMarket(marketId: string): Promise<Thesis | null> {
-    const active = await this.getActive();
-    return active.find(t => t.marketId === marketId) ?? null;
-  }
-
-  async create(thesis: Thesis): Promise<void> {
-    this.theses.set(thesis.id, thesis);
-  }
-
-  async update(id: string, updates: Partial<Thesis>): Promise<void> {
-    const existing = this.theses.get(id);
-    if (existing) {
-      this.theses.set(id, { ...existing, ...updates, updatedAt: new Date() });
-    }
-  }
-
-  async createSnapshot(snapshot: DataSnapshot): Promise<void> {
-    this.snapshots.set(snapshot.id, snapshot);
-  }
-
-  async getSnapshot(id: string): Promise<DataSnapshot | null> {
-    return this.snapshots.get(id) ?? null;
-  }
-
-  async recordPerformance(perf: ThesisPerformance): Promise<void> {
-    this.performance.push(perf);
-  }
-
-  async getPerformanceByModel(modelId: string): Promise<ThesisPerformance[]> {
-    return this.performance.filter(p => p.modelId === modelId);
-  }
-
-  // Testing helpers
-  clear(): void {
-    this.theses.clear();
-    this.snapshots.clear();
-    this.performance = [];
-  }
-}
-
 export interface ThesisServiceEvents {
   onThesisCreated?: (thesis: Thesis) => void;
   onThesisInvalidated?: (thesis: Thesis, reason: string) => void;
@@ -428,9 +365,3 @@ export class ThesisService {
   }
 }
 
-// Factory function
-export function createThesisService(
-  events: ThesisServiceEvents = {}
-): ThesisService {
-  return new ThesisService(new InMemoryThesisStorage(), events);
-}

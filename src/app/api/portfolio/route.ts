@@ -1,11 +1,13 @@
 // GET /api/portfolio - Get account balance and portfolio value
-import { NextResponse } from 'next/server';
-import { getBalance, KalshiApiError } from '@/lib/kalshi';
+import { NextRequest, NextResponse } from 'next/server';
+import { getBalance } from '@/lib/kalshi';
+import { handleApiError } from '@/lib/api-utils';
+import { withAuth } from '@/lib/api-auth';
 
-export async function GET() {
+export const GET = withAuth(async function GET(_request: NextRequest) {
   try {
     const balance = await getBalance();
-    
+
     return NextResponse.json({
       success: true,
       data: {
@@ -17,18 +19,6 @@ export async function GET() {
       },
     });
   } catch (error) {
-    console.error('Portfolio API error:', error);
-    
-    if (error instanceof KalshiApiError) {
-      return NextResponse.json(
-        { success: false, error: error.apiMessage },
-        { status: error.statusCode }
-      );
-    }
-    
-    return NextResponse.json(
-      { success: false, error: 'Failed to fetch portfolio' },
-      { status: 500 }
-    );
+    return handleApiError(error, 'Failed to fetch portfolio');
   }
-}
+});

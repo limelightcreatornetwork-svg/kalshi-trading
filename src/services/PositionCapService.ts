@@ -27,76 +27,6 @@ export interface PositionCapStorage {
   getTotalPortfolioValue(): Promise<number>;
 }
 
-// In-memory storage for testing
-export class InMemoryPositionCapStorage implements PositionCapStorage {
-  private markets: Map<string, Market> = new Map();
-  private positions: Map<string, Position> = new Map();
-  private caps: Map<string, PositionCap> = new Map();
-  private portfolioValue: number = 100000; // Default portfolio value
-
-  async getMarket(id: string): Promise<Market | null> {
-    return this.markets.get(id) ?? null;
-  }
-
-  async getMarketByExternalId(externalId: string): Promise<Market | null> {
-    for (const market of this.markets.values()) {
-      if (market.externalId === externalId) {
-        return market;
-      }
-    }
-    return null;
-  }
-
-  async createMarket(market: Market): Promise<void> {
-    this.markets.set(market.id, market);
-  }
-
-  async updateMarket(id: string, updates: Partial<Market>): Promise<void> {
-    const existing = this.markets.get(id);
-    if (existing) {
-      this.markets.set(id, { ...existing, ...updates, updatedAt: new Date() });
-    }
-  }
-
-  async getPosition(marketId: string, side: string): Promise<Position | null> {
-    return this.positions.get(`${marketId}:${side}`) ?? null;
-  }
-
-  async upsertPosition(position: Position): Promise<void> {
-    this.positions.set(`${position.marketId}:${position.side}`, position);
-  }
-
-  async getCaps(marketId?: string): Promise<PositionCap[]> {
-    return Array.from(this.caps.values()).filter(c => 
-      marketId ? c.marketId === marketId : !c.marketId
-    );
-  }
-
-  async upsertCap(cap: PositionCap): Promise<void> {
-    const key = `${cap.marketId ?? 'global'}:${cap.capType}`;
-    this.caps.set(key, cap);
-  }
-
-  async getGlobalCaps(): Promise<PositionCap[]> {
-    return Array.from(this.caps.values()).filter(c => !c.marketId);
-  }
-
-  async getTotalPortfolioValue(): Promise<number> {
-    return this.portfolioValue;
-  }
-
-  // For testing
-  setPortfolioValue(value: number): void {
-    this.portfolioValue = value;
-  }
-
-  clear(): void {
-    this.markets.clear();
-    this.positions.clear();
-    this.caps.clear();
-  }
-}
-
 export interface PositionCapServiceEvents {
   onSoftLimitWarning?: (cap: PositionCap, currentValue: number) => void;
   onHardLimitBlocked?: (cap: PositionCap, requestedValue: number) => void;
@@ -433,9 +363,3 @@ export class PositionCapService {
   }
 }
 
-// Factory function
-export function createPositionCapService(
-  events: PositionCapServiceEvents = {}
-): PositionCapService {
-  return new PositionCapService(new InMemoryPositionCapStorage(), events);
-}

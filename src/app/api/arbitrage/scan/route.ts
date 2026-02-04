@@ -3,6 +3,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { KalshiApiError } from '@/lib/kalshi';
+import { withAuth } from '@/lib/api-auth';
 
 // Dynamically import the service to avoid Prisma initialization at build time
 async function getArbitrageService() {
@@ -10,7 +11,7 @@ async function getArbitrageService() {
   return arbitrageService;
 }
 
-export async function POST() {
+export const POST = withAuth(async function POST() {
   try {
     const arbitrageService = await getArbitrageService();
     const result = await arbitrageService.scanForOpportunities();
@@ -34,9 +35,9 @@ export async function POST() {
       { status: 500 }
     );
   }
-}
+});
 
-export async function GET(request: NextRequest) {
+export const GET = withAuth(async function GET(request: NextRequest) {
   try {
     const arbitrageService = await getArbitrageService();
     const searchParams = request.nextUrl.searchParams;
@@ -71,4 +72,4 @@ export async function GET(request: NextRequest) {
       { status: 500 }
     );
   }
-}
+});

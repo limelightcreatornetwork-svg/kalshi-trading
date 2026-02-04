@@ -2,10 +2,9 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import {
   KillSwitchService,
-  InMemoryKillSwitchStorage,
   KillSwitchServiceEvents,
-  createKillSwitchService,
 } from '../services/KillSwitchService';
+import { InMemoryKillSwitchStorage, createKillSwitchService } from './helpers/test-factories';
 import {
   KillSwitchLevel,
   KillSwitchReason,

@@ -483,10 +483,3 @@ export class StrategyRegistry {
   }
 }
 
-// Factory function
-export function createStrategyRegistry(
-  config: Partial<StrategyRegistryConfig> = {},
-  events: StrategyRegistryEvents = {}
-): StrategyRegistry {
-  return new StrategyRegistry(config, events);
-}

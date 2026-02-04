@@ -77,6 +77,9 @@ DATABASE_URL="file:./dev.db"
 
 # Encryption key for secrets (generate with: node -e "console.log(require('crypto').randomBytes(32).toString('hex'))")
 SECRETS_ENCRYPTION_KEY=your-64-char-hex-key
+
+# Optional - Protect API endpoints
+KALSHI_APP_API_KEY=your-dashboard-api-key
 ```
 
 ### Running the Application

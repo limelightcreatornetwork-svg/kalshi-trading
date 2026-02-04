@@ -1,21 +1,23 @@
 // GET /api/orders - Get orders
 // POST /api/orders - Create new order
 import { NextRequest, NextResponse } from 'next/server';
-import { getOrders, createOrder, CreateOrderRequest, KalshiApiError } from '@/lib/kalshi';
+import { getOrders, createOrder, CreateOrderRequest } from '@/lib/kalshi';
+import { handleApiError } from '@/lib/api-utils';
+import { withAuth } from '@/lib/api-auth';
 
-export async function GET(request: NextRequest) {
+export const GET = withAuth(async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams;
-    
+
     const params = {
       limit: searchParams.get('limit') ? parseInt(searchParams.get('limit')!) : 50,
       cursor: searchParams.get('cursor') || undefined,
       ticker: searchParams.get('ticker') || undefined,
       status: searchParams.get('status') || undefined,
     };
-    
+
     const response = await getOrders(params);
-    
+
     // Transform orders
     const orders = response.orders.map(order => ({
       orderId: order.order_id,
@@ -37,7 +39,7 @@ export async function GET(request: NextRequest) {
       createdTime: order.created_time,
       lastUpdateTime: order.last_update_time,
     }));
-    
+
     return NextResponse.json({
       success: true,
       data: {
@@ -47,26 +49,14 @@ export async function GET(request: NextRequest) {
       },
     });
   } catch (error) {
-    console.error('Orders GET API error:', error);
-    
-    if (error instanceof KalshiApiError) {
-      return NextResponse.json(
-        { success: false, error: error.apiMessage },
-        { status: error.statusCode }
-      );
-    }
-    
-    return NextResponse.json(
-      { success: false, error: 'Failed to fetch orders' },
-      { status: 500 }
-    );
+    return handleApiError(error, 'Failed to fetch orders');
   }
-}
+});
 
-export async function POST(request: NextRequest) {
+export const POST = withAuth(async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    
+
     // Validate required fields
     if (!body.ticker) {
       return NextResponse.json(
@@ -92,7 +82,7 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
-    
+
     // Build order request
     const orderRequest: CreateOrderRequest = {
       ticker: body.ticker,
@@ -101,7 +91,7 @@ export async function POST(request: NextRequest) {
       count: body.count,
       type: body.type || 'limit',
     };
-    
+
     // Add optional price (required for limit orders)
     if (body.yesPrice !== undefined) {
       orderRequest.yes_price = body.yesPrice;
@@ -109,7 +99,7 @@ export async function POST(request: NextRequest) {
     if (body.noPrice !== undefined) {
       orderRequest.no_price = body.noPrice;
     }
-    
+
     // Add other optional fields
     if (body.clientOrderId) {
       orderRequest.client_order_id = body.clientOrderId;
@@ -123,11 +113,11 @@ export async function POST(request: NextRequest) {
     if (body.postOnly !== undefined) {
       orderRequest.post_only = body.postOnly;
     }
-    
+
     const response = await createOrder(orderRequest);
-    
+
     const order = response.order;
-    
+
     return NextResponse.json({
       success: true,
       data: {
@@ -147,18 +137,6 @@ export async function POST(request: NextRequest) {
       },
     }, { status: 201 });
   } catch (error) {
-    console.error('Orders POST API error:', error);
-    
-    if (error instanceof KalshiApiError) {
-      return NextResponse.json(
-        { success: false, error: error.apiMessage },
-        { status: error.statusCode }
-      );
-    }
-    
-    return NextResponse.json(
-      { success: false, error: 'Failed to create order' },
-      { status: 500 }
-    );
+    return handleApiError(error, 'Failed to create order');
   }
-}
+});

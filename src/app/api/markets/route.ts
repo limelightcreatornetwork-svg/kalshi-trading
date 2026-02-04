@@ -1,11 +1,13 @@
 // GET /api/markets - List available markets with search/filter
 import { NextRequest, NextResponse } from 'next/server';
-import { getMarkets, KalshiApiError } from '@/lib/kalshi';
+import { getMarkets } from '@/lib/kalshi';
+import { handleApiError } from '@/lib/api-utils';
+import { withAuth } from '@/lib/api-auth';
 
-export async function GET(request: NextRequest) {
+export const GET = withAuth(async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams;
-    
+
     const params = {
       limit: searchParams.get('limit') ? parseInt(searchParams.get('limit')!) : 20,
       cursor: searchParams.get('cursor') || undefined,
@@ -14,9 +16,9 @@ export async function GET(request: NextRequest) {
       status: searchParams.get('status') || undefined,
       tickers: searchParams.get('tickers') || undefined,
     };
-    
+
     const response = await getMarkets(params);
-    
+
     // Transform markets to include dollar values
     const markets = response.markets.map(market => ({
       ticker: market.ticker,
@@ -41,7 +43,7 @@ export async function GET(request: NextRequest) {
       expirationTime: market.expiration_time,
       result: market.result,
     }));
-    
+
     return NextResponse.json({
       success: true,
       data: {
@@ -51,18 +53,6 @@ export async function GET(request: NextRequest) {
       },
     });
   } catch (error) {
-    console.error('Markets API error:', error);
-    
-    if (error instanceof KalshiApiError) {
-      return NextResponse.json(
-        { success: false, error: error.apiMessage },
-        { status: error.statusCode }
-      );
-    }
-    
-    return NextResponse.json(
-      { success: false, error: 'Failed to fetch markets' },
-      { status: 500 }
-    );
+    return handleApiError(error, 'Failed to fetch markets');
   }
-}
+});

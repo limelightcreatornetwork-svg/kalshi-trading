@@ -2,10 +2,9 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import {
   IdempotencyService,
-  InMemoryIdempotencyStorage,
   IdempotencyConflictError,
-  createIdempotencyService,
 } from '../services/IdempotencyService';
+import { InMemoryIdempotencyStorage, createIdempotencyService } from './helpers/test-factories';
 
 describe('InMemoryIdempotencyStorage', () => {
   let storage: InMemoryIdempotencyStorage;

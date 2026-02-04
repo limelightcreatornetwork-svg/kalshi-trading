@@ -23,59 +23,6 @@ export interface KillSwitchStorage {
   setConfig(config: KillSwitchConfig): Promise<void>;
 }
 
-// In-memory storage for testing
-export class InMemoryKillSwitchStorage implements KillSwitchStorage {
-  private switches: Map<string, KillSwitch> = new Map();
-  private configs: Map<string, KillSwitchConfig> = new Map();
-
-  async getActive(): Promise<KillSwitch[]> {
-    const now = new Date();
-    return Array.from(this.switches.values()).filter(s => {
-      if (!s.isActive) return false;
-      // Check auto-reset
-      if (s.autoResetAt && s.autoResetAt <= now) return false;
-      return true;
-    });
-  }
-
-  async getByLevel(level: KillSwitchLevel): Promise<KillSwitch[]> {
-    return Array.from(this.switches.values()).filter(s => 
-      s.level === level && s.isActive
-    );
-  }
-
-  async getById(id: string): Promise<KillSwitch | null> {
-    return this.switches.get(id) ?? null;
-  }
-
-  async create(killSwitch: KillSwitch): Promise<void> {
-    this.switches.set(killSwitch.id, killSwitch);
-  }
-
-  async update(id: string, updates: Partial<KillSwitch>): Promise<void> {
-    const existing = this.switches.get(id);
-    if (existing) {
-      this.switches.set(id, { ...existing, ...updates, updatedAt: new Date() });
-    }
-  }
-
-  async getConfig(level: KillSwitchLevel, targetId?: string): Promise<KillSwitchConfig | null> {
-    const key = `${level}:${targetId ?? 'global'}`;
-    return this.configs.get(key) ?? null;
-  }
-
-  async setConfig(config: KillSwitchConfig): Promise<void> {
-    const key = `${config.level}:${config.targetId ?? 'global'}`;
-    this.configs.set(key, config);
-  }
-
-  // For testing
-  clear(): void {
-    this.switches.clear();
-    this.configs.clear();
-  }
-}
-
 export interface KillSwitchServiceEvents {
   onTrigger?: (killSwitch: KillSwitch) => void;
   onReset?: (killSwitch: KillSwitch) => void;
@@ -367,9 +314,3 @@ export class KillSwitchService {
   }
 }
 
-// Factory function
-export function createKillSwitchService(
-  events: KillSwitchServiceEvents = {}
-): KillSwitchService {
-  return new KillSwitchService(new InMemoryKillSwitchStorage(), events);
-}
