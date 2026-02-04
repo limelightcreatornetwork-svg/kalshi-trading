@@ -2,7 +2,7 @@
 // Scans Kalshi markets for pricing inefficiencies
 
 import { v4 as uuid } from 'uuid';
-import { getMarkets, createOrder, Market } from '@/lib/kalshi';
+import { getMarkets, createOrder, cancelOrder, Market } from '@/lib/kalshi';
 import type { 
   ArbitrageOpportunity, 
   ArbitrageScanResult, 
@@ -389,17 +389,30 @@ export class ArbitrageService {
         type: 'limit',
         yes_price: Number(opportunity.yesAsk),
       });
-      
-      // Place NO order
-      const noOrder = await createOrder({
-        ticker: opportunity.marketTicker,
-        side: 'no',
-        action: 'buy',
-        count: request.contracts,
-        type: 'limit',
-        no_price: Number(opportunity.noAsk),
-      });
-      
+
+      // Place NO order - if this fails, cancel the YES order to avoid unhedged position
+      let noOrder;
+      try {
+        noOrder = await createOrder({
+          ticker: opportunity.marketTicker,
+          side: 'no',
+          action: 'buy',
+          count: request.contracts,
+          type: 'limit',
+          no_price: Number(opportunity.noAsk),
+        });
+      } catch (noOrderError) {
+        // Critical: YES order succeeded but NO order failed - cancel YES to avoid unhedged position
+        try {
+          await cancelOrder(yesOrder.order.order_id);
+        } catch (cancelError) {
+          // If cancel also fails, we have an unhedged position - rethrow with context
+          const msg = `CRITICAL: NO order failed and YES order ${yesOrder.order.order_id} cancel also failed. Manual intervention required.`;
+          throw new Error(msg);
+        }
+        throw noOrderError;
+      }
+
       const totalCost = (Number(opportunity.yesAsk) + Number(opportunity.noAsk)) * request.contracts;
       const expectedProfit = Number(opportunity.profitCents) * request.contracts;
       

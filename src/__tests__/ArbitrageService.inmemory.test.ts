@@ -12,10 +12,11 @@ vi.mock('../lib/prisma', () => ({
 vi.mock('../lib/kalshi', () => ({
   getMarkets: vi.fn(),
   createOrder: vi.fn(),
+  cancelOrder: vi.fn(),
 }));
 
 import { ArbitrageService } from '../services/ArbitrageService';
-import { getMarkets, createOrder } from '../lib/kalshi';
+import { getMarkets, createOrder, cancelOrder } from '../lib/kalshi';
 import type { Market } from '../lib/kalshi';
 
 function makeMarket(overrides: Partial<Market> = {}): Market {
@@ -378,6 +379,42 @@ describe('ArbitrageService - In-Memory Fallback', () => {
 
       expect(result.success).toBe(false);
       expect(result.error).toBe('Opportunity is EXECUTED');
+    });
+
+    it('should cancel YES order when NO order fails (in-memory)', async () => {
+      const markets = [makeMarket({ ticker: 'INMEM-RACE', yes_ask: 44, no_ask: 50 })];
+      vi.mocked(getMarkets).mockResolvedValueOnce({ markets, cursor: undefined });
+      const scan = await service.scanForOpportunities();
+      const oppId = scan.opportunities[0].id;
+
+      vi.mocked(createOrder)
+        .mockResolvedValueOnce({ order: { order_id: 'yes-inmem-123' } } as any)
+        .mockRejectedValueOnce(new Error('NO order failed'));
+      vi.mocked(cancelOrder).mockResolvedValueOnce({ order: { order_id: 'yes-inmem-123' } } as any);
+
+      const result = await service.executeOpportunity({ opportunityId: oppId, contracts: 2 });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBe('NO order failed');
+      expect(cancelOrder).toHaveBeenCalledWith('yes-inmem-123');
+    });
+
+    it('should report critical error when cancel also fails (in-memory)', async () => {
+      const markets = [makeMarket({ ticker: 'INMEM-CRIT', yes_ask: 43, no_ask: 51 })];
+      vi.mocked(getMarkets).mockResolvedValueOnce({ markets, cursor: undefined });
+      const scan = await service.scanForOpportunities();
+      const oppId = scan.opportunities[0].id;
+
+      vi.mocked(createOrder)
+        .mockResolvedValueOnce({ order: { order_id: 'yes-stuck' } } as any)
+        .mockRejectedValueOnce(new Error('NO rejected'));
+      vi.mocked(cancelOrder).mockRejectedValueOnce(new Error('Cancel also failed'));
+
+      const result = await service.executeOpportunity({ opportunityId: oppId, contracts: 1 });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('CRITICAL');
+      expect(result.error).toContain('yes-stuck');
     });
   });
 

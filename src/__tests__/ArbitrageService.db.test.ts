@@ -138,9 +138,10 @@ vi.mock('../lib/prisma', () => ({
 vi.mock('../lib/kalshi', () => ({
   getMarkets: vi.fn(),
   createOrder: vi.fn(),
+  cancelOrder: vi.fn(),
 }));
 
-import { getMarkets, createOrder } from '../lib/kalshi';
+import { getMarkets, createOrder, cancelOrder } from '../lib/kalshi';
 
 describe('ArbitrageService - Database Methods', () => {
   let service: ArbitrageService;
@@ -693,6 +694,59 @@ describe('ArbitrageService - Database Methods', () => {
 
       const updated = mockOpportunities.get('active-opp');
       expect(updated.status).toBe('MISSED');
+    });
+
+    it('should cancel YES order when NO order fails', async () => {
+      mockOpportunities.set('race-opp', {
+        id: 'race-opp',
+        type: 'SINGLE_MARKET',
+        status: 'ACTIVE',
+        marketTicker: 'RACE-MKT',
+        yesAsk: 45,
+        noAsk: 49,
+        profitCents: 6,
+      });
+
+      vi.mocked(createOrder)
+        .mockResolvedValueOnce({ order: { order_id: 'yes-order-789' } } as any)
+        .mockRejectedValueOnce(new Error('NO order rejected'));
+      vi.mocked(cancelOrder).mockResolvedValueOnce({ order: { order_id: 'yes-order-789' } } as any);
+
+      const result = await service.executeOpportunity({
+        opportunityId: 'race-opp',
+        contracts: 5,
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBe('NO order rejected');
+      expect(cancelOrder).toHaveBeenCalledWith('yes-order-789');
+    });
+
+    it('should report critical error when both NO order and YES cancel fail', async () => {
+      mockOpportunities.set('critical-opp', {
+        id: 'critical-opp',
+        type: 'SINGLE_MARKET',
+        status: 'ACTIVE',
+        marketTicker: 'CRIT-MKT',
+        yesAsk: 44,
+        noAsk: 50,
+        profitCents: 6,
+      });
+
+      vi.mocked(createOrder)
+        .mockResolvedValueOnce({ order: { order_id: 'yes-order-unhedged' } } as any)
+        .mockRejectedValueOnce(new Error('NO order rejected'));
+      vi.mocked(cancelOrder).mockRejectedValueOnce(new Error('Cancel failed'));
+
+      const result = await service.executeOpportunity({
+        opportunityId: 'critical-opp',
+        contracts: 3,
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('CRITICAL');
+      expect(result.error).toContain('yes-order-unhedged');
+      expect(result.error).toContain('Manual intervention required');
     });
   });
 

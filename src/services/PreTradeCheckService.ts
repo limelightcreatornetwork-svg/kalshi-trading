@@ -423,6 +423,7 @@ export class PreTradeCheckService {
       totalCost += remaining * (lastPrice + 5); // 5 cent penalty
     }
 
+    if (request.quantity === 0) return 0;
     const avgPrice = totalCost / request.quantity;
     return Math.abs(avgPrice - startPrice);
   }

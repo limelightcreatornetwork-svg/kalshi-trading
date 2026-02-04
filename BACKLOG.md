@@ -92,13 +92,15 @@
 | 33 | 2026-02-04 | Testing | service-factories getStrategyManagementService tests (3 new) |
 | 34 | 2026-02-04 | Quality | Fix duplicate id in ValueStrategy tests, OrderStateMachine terminal state tests (6 new) |
 | 35 | 2026-02-04 | Testing | KalshiWebSocketService coverage tests (19 new, 82.45% → 95.17%) |
+| 36 | 2026-02-04 | Bug Fix + Testing | Fix 4 failing tests (Vitest 4 mock constructor, method name), add KillSwitch/Secrets/Prisma coverage (16 new) |
+| 37 | 2026-02-04 | Bug Fix + Testing | Fix arbitrage execution race condition (cancel YES if NO fails), add division-by-zero guard (4 new) |
 
 ---
 
 ## Statistics
 
-- **Total Tests**: 1073 (all passing)
-- **Coverage**: ~97.12% statements
+- **Total Tests**: 1093 (all passing)
+- **Coverage**: ~97.55% statements
 - **Key Improvements**:
   - kalshi.ts: 3.41% → 94.82% (+91%)
   - ValueStrategy: 47.27% → 100% (+53%)
