@@ -41,6 +41,12 @@ function Navigation() {
               🎯 Arbitrage Scanner
             </Link>
             <Link
+              href="/strategies"
+              className="text-zinc-400 hover:text-white transition-colors text-sm font-medium"
+            >
+              🧠 Strategies
+            </Link>
+            <Link
               href="/markets"
               className="text-zinc-400 hover:text-white transition-colors text-sm font-medium"
             >
