@@ -277,6 +277,32 @@ describe('Service Factories', () => {
       expect(summary.totalUnrealizedPnl).toBe(0);
     });
   });
+
+  // ─── getStrategyManagementService ──────────────────────────────
+
+  describe('getStrategyManagementService', () => {
+    it('should return a StrategyManagementService instance', async () => {
+      const { getStrategyManagementService } = await import('../lib/service-factories');
+      const service = getStrategyManagementService();
+      expect(service).toBeDefined();
+      expect(typeof service.listStrategies).toBe('function');
+      expect(typeof service.createStrategy).toBe('function');
+    });
+
+    it('should return the same singleton instance', async () => {
+      const { getStrategyManagementService } = await import('../lib/service-factories');
+      const service1 = getStrategyManagementService();
+      const service2 = getStrategyManagementService();
+      expect(service1).toBe(service2);
+    });
+
+    it('should use in-memory storage (no strategies initially)', async () => {
+      const { getStrategyManagementService } = await import('../lib/service-factories');
+      const service = getStrategyManagementService();
+      const strategies = await service.listStrategies();
+      expect(strategies).toEqual([]);
+    });
+  });
 });
 
 // ─── KalshiMarketPriceProvider (via factory) ───────────────────────
