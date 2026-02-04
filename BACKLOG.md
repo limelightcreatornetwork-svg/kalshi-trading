@@ -17,7 +17,7 @@
 - [x] **KALSHI-015**: Update remaining API routes to use structured logging ✅
 
 #### P3 - Low Priority
-- [ ] **KALSHI-011**: Add request/response logging with configurable levels
+- [x] **KALSHI-011**: Add request/response logging with configurable levels ✅
 - [ ] **KALSHI-012**: Add rate limiting handling for API calls
 
 ---
@@ -47,6 +47,7 @@
 - [x] **KALSHI-013**: Implement unrealized P&L calculation with cost basis tracking ✅ (35 tests)
 - [x] **KALSHI-014**: Per-trade P&L tracking in performance dashboard ✅ (AnalyticsService integration)
 - [x] **KALSHI-015**: Structured logging across all API routes ✅ (10 routes updated)
+- [x] **KALSHI-011**: Request/response logging in Kalshi API client ✅ (with timing, retries)
 - [x] **FEATURE-001**: Add /api/health endpoint for deployment monitoring ✅
 
 ---
@@ -76,6 +77,7 @@
 | 19 | 2026-02-04 | Feature | Unrealized P&L with cost basis tracking (35 tests), updated dashboards |
 | 20 | 2026-02-04 | Feature | Per-trade P&L tracking: integrated AnalyticsService into performance dashboard |
 | 21 | 2026-02-04 | Quality | Structured logging in all API routes (10 routes, handleApiError utility) |
+| 22 | 2026-02-04 | Quality | Request/response logging in Kalshi API client with timing metrics |
 
 ---
 

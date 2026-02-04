@@ -204,6 +204,7 @@ async function apiRequest<T>(
   let lastError: Error | null = null;
 
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+    const startTime = Date.now();
     try {
       // Generate fresh auth headers for each attempt (timestamp must be current)
       const headers = getAuthHeaders(method, path);
@@ -217,7 +218,10 @@ async function apiRequest<T>(
         options.body = JSON.stringify(body);
       }
 
+      log.debug('API request', { method, endpoint, attempt: attempt > 0 ? attempt : undefined });
+
       const response = await fetchWithTimeout(url, options);
+      const durationMs = Date.now() - startTime;
 
       if (!response.ok) {
         let apiMessage = `HTTP ${response.status}`;
@@ -228,9 +232,12 @@ async function apiRequest<T>(
           apiMessage = response.statusText || apiMessage;
         }
 
+        log.warn('API error response', { method, endpoint, status: response.status, durationMs, message: apiMessage });
+
         // Check if this error is retryable
         if (RETRYABLE_STATUS_CODES.has(response.status) && attempt < MAX_RETRIES - 1) {
           const delayMs = RETRY_BASE_DELAY_MS * Math.pow(2, attempt);
+          log.debug('Retrying request', { method, endpoint, attempt: attempt + 1, delayMs });
           await sleep(delayMs);
           continue;
         }
@@ -238,12 +245,16 @@ async function apiRequest<T>(
         throw new KalshiApiError(response.status, apiMessage);
       }
 
+      log.debug('API response', { method, endpoint, status: response.status, durationMs });
+
       return response.json();
     } catch (error) {
       lastError = error as Error;
+      const durationMs = Date.now() - startTime;
 
       // Handle timeout/abort errors
       if (error instanceof Error && error.name === 'AbortError') {
+        log.warn('Request timeout', { method, endpoint, durationMs, attempt });
         if (attempt < MAX_RETRIES - 1) {
           const delayMs = RETRY_BASE_DELAY_MS * Math.pow(2, attempt);
           await sleep(delayMs);
@@ -254,6 +265,7 @@ async function apiRequest<T>(
 
       // Handle network errors (fetch failed)
       if (error instanceof TypeError && attempt < MAX_RETRIES - 1) {
+        log.warn('Network error', { method, endpoint, durationMs, error: error.message });
         const delayMs = RETRY_BASE_DELAY_MS * Math.pow(2, attempt);
         await sleep(delayMs);
         continue;
