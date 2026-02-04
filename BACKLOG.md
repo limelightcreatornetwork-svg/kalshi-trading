@@ -81,15 +81,21 @@
 | 22 | 2026-02-04 | Quality | Request/response logging in Kalshi API client with timing metrics |
 | 23 | 2026-02-04 | Reliability | Rate limiter with Retry-After parsing and proactive request throttle |
 | 24 | 2026-02-04 | Testing | PositionCapService configured caps tests (12 new, 78.7% → ~95%) |
+| 25 | 2026-02-04 | Testing | ArbitrageService in-memory fallback tests (24 new, 66.91% → 97.74%) |
+| 26 | 2026-02-04 | Testing | service-factories.ts tests (25 new, 10.63% → 87.23%) |
+| 27 | 2026-02-04 | Testing | ForecastingService coverage tests (20 new, 77.02% → 95.49%) |
+| 28 | 2026-02-04 | Testing | kalshi.ts coverage tests (12 new, 77.01% → 94.82%) |
+| 29 | 2026-02-04 | Testing | logger.ts + prisma.ts tests (24 new, logger 87% → 97.87%) |
+| 30 | 2026-02-04 | Testing | Analytics route error path tests (17 new, routes → 100%) |
 
 ---
 
 ## Statistics
 
-- **Total Tests**: 827 (all passing)
-- **Coverage**: ~89% statements
+- **Total Tests**: 949 (all passing)
+- **Coverage**: 95.73% statements
 - **Key Improvements**:
-  - kalshi.ts: 3.41% → 82.35% (+79%)
+  - kalshi.ts: 3.41% → 94.82% (+91%)
   - ValueStrategy: 47.27% → 100% (+53%)
   - BaseStrategy: 51.61% → 100% (+48%)
   - Strategies overall: 40.17% → 100% (+60%)
@@ -97,6 +103,11 @@
   - DailyPnLService: 56.62% → 100% (+43%)
   - api-auth.ts: 59.64% → 98.24% (+39%)
   - ThesisService: 76.13% → 97.72% (+22%)
+  - ForecastingService: 77.02% → 95.49% (+18%)
+  - service-factories.ts: 10.63% → 87.23% (+77%)
+  - logger.ts: 87.23% → 97.87% (+11%)
+  - Analytics routes: 78-82% → 100% (+18-22%)
+  - ArbitrageService: 66.91% → 97.74% (+31%)
   - Added ForecastingService with 31 tests
   - Added market-utils with 31 tests
   - Added timeout/retry for API reliability
