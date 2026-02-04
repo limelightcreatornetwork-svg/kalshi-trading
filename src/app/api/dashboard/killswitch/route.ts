@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { withAuth } from '@/lib/api-auth';
 import { getKillSwitchService } from '@/lib/service-factories';
 import { KillSwitchLevel, KillSwitchReason } from '@/types/killswitch';
+import { createLogger } from '@/lib/logger';
+
+const log = createLogger('KillSwitchAPI');
 
 const DEFAULT_CONFIG = {
   maxDailyLoss: 500,
@@ -34,7 +37,7 @@ export const GET = withAuth(async function GET() {
       config: DEFAULT_CONFIG,
     });
   } catch (error) {
-    console.error('Kill switch GET error:', error);
+    log.error('Kill switch GET error', { error: error instanceof Error ? error.message : String(error) });
     return NextResponse.json(
       { success: false, error: 'Failed to fetch kill switch state' },
       { status: 500 }
@@ -76,7 +79,7 @@ export const POST = withAuth(async function POST(request: NextRequest) {
     const killSwitch = await getKillSwitchSnapshot();
     return NextResponse.json({ success: true, killSwitch });
   } catch (error) {
-    console.error('Kill switch POST error:', error);
+    log.error('Kill switch POST error', { error: error instanceof Error ? error.message : String(error) });
     return NextResponse.json(
       { success: false, error: 'Invalid request body' },
       { status: 400 }

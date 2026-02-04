@@ -4,6 +4,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { KalshiApiError } from '@/lib/kalshi';
 import { withAuth } from '@/lib/api-auth';
+import { createLogger } from '@/lib/logger';
+
+const log = createLogger('ArbitrageScanAPI');
 
 // Dynamically import the service to avoid Prisma initialization at build time
 async function getArbitrageService() {
@@ -21,7 +24,7 @@ export const POST = withAuth(async function POST() {
       data: result,
     });
   } catch (error) {
-    console.error('Arbitrage scan error:', error);
+    log.error('Arbitrage scan error', { error: error instanceof Error ? error.message : String(error) });
     
     if (error instanceof KalshiApiError) {
       return NextResponse.json(
@@ -65,7 +68,7 @@ export const GET = withAuth(async function GET(request: NextRequest) {
     
     return NextResponse.json(response);
   } catch (error) {
-    console.error('Arbitrage scan GET error:', error);
+    log.error('Arbitrage scan GET error', { error: error instanceof Error ? error.message : String(error) });
     
     return NextResponse.json(
       { success: false, error: error instanceof Error ? error.message : 'Failed to get opportunities' },

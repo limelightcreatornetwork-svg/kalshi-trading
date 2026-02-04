@@ -1,7 +1,11 @@
 import { NextResponse } from 'next/server';
 import { getBalance, getPositions } from '@/lib/kalshi';
 import { withAuth } from '@/lib/api-auth';
-import { getDailyPnLService, getKillSwitchService } from '@/lib/service-factories';
+import { getDailyPnLService, getKillSwitchService, createUnrealizedPnLServiceWithPositions } from '@/lib/service-factories';
+import { Position } from '@/types/position';
+import { createLogger } from '@/lib/logger';
+
+const log = createLogger('RiskAPI');
 
 const DEFAULT_LIMITS = {
   maxDailyLoss: 500,
@@ -69,6 +73,51 @@ export const GET = withAuth(async function GET() {
     const realizedPnl = todayPnL?.realizedPnl ?? positions.reduce((sum, p) => sum + p.realized_pnl, 0) / 100;
     const dailyUsed = Math.abs(realizedPnl);
 
+    let unrealizedPnl = todayPnL?.unrealizedPnl ?? 0;
+    let perPositionPnL: Array<{
+      ticker: string;
+      side: string;
+      quantity: number;
+      avgEntryPrice: number;
+      currentPrice: number;
+      unrealizedPnl: number;
+      unrealizedPnlPct: number;
+    }> = [];
+
+    try {
+      // Build positions for P&L calculation from Kalshi API data
+      const positionsForPnL: Position[] = positions
+        .filter((p) => Math.abs(p.position) > 0)
+        .map((p) => ({
+          id: p.ticker,
+          marketId: p.ticker,
+          side: (p.position > 0 ? 'yes' : 'no') as 'yes' | 'no',
+          quantity: Math.abs(p.position),
+          avgPrice: Math.abs(p.market_exposure) / Math.abs(p.position),
+          realizedPnl: p.realized_pnl / 100,
+          unrealizedPnl: 0,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        }));
+
+      if (positionsForPnL.length > 0) {
+        const pnlService = createUnrealizedPnLServiceWithPositions(positionsForPnL);
+        const summary = await pnlService.refreshAll();
+        unrealizedPnl = summary.totalUnrealizedPnl / 100; // cents to dollars
+        perPositionPnL = summary.positions.map((p) => ({
+          ticker: p.ticker,
+          side: p.side,
+          quantity: p.quantity,
+          avgEntryPrice: p.avgEntryPrice / 100,
+          currentPrice: p.currentPrice / 100,
+          unrealizedPnl: p.unrealizedPnl / 100,
+          unrealizedPnlPct: p.unrealizedPnlPct,
+        }));
+      }
+    } catch {
+      // Fall back to DailyPnLService value
+    }
+
     let killSwitch = {
       enabled: true,
       status: 'active',
@@ -125,7 +174,8 @@ export const GET = withAuth(async function GET() {
       },
       pnl: {
         realized: realizedPnl,
-        unrealized: todayPnL?.unrealizedPnl ?? 0,
+        unrealized: unrealizedPnl,
+        perPosition: perPositionPnL,
         dailyLimit: DEFAULT_LIMITS.maxDailyLoss,
         dailyUsed,
         dailyUtilization: DEFAULT_LIMITS.maxDailyLoss > 0
@@ -139,7 +189,7 @@ export const GET = withAuth(async function GET() {
 
     return NextResponse.json(riskData);
   } catch (error) {
-    console.error('Risk API error:', error);
+    log.error('Risk API error', { error: error instanceof Error ? error.message : String(error) });
     return NextResponse.json(
       { error: 'Failed to fetch live data' },
       { status: 500 }

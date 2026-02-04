@@ -14,7 +14,7 @@
 
 #### P2 - Medium Priority
 - [x] **KALSHI-014**: Implement proper per-trade P&L tracking for win/loss stats ✅
-- [ ] **KALSHI-015**: Update remaining API routes to use structured logging
+- [x] **KALSHI-015**: Update remaining API routes to use structured logging ✅
 
 #### P3 - Low Priority
 - [ ] **KALSHI-011**: Add request/response logging with configurable levels
@@ -46,6 +46,7 @@
 - [x] **BUG-003**: Fix Brier score calculation in ThesisService ✅ (used √ instead of ²)
 - [x] **KALSHI-013**: Implement unrealized P&L calculation with cost basis tracking ✅ (35 tests)
 - [x] **KALSHI-014**: Per-trade P&L tracking in performance dashboard ✅ (AnalyticsService integration)
+- [x] **KALSHI-015**: Structured logging across all API routes ✅ (10 routes updated)
 - [x] **FEATURE-001**: Add /api/health endpoint for deployment monitoring ✅
 
 ---
@@ -74,6 +75,7 @@
 | 18 | 2026-02-04 | Bug Fix + Testing | Fixed Brier score bug, api-auth tests (21), ThesisService tests (23) |
 | 19 | 2026-02-04 | Feature | Unrealized P&L with cost basis tracking (35 tests), updated dashboards |
 | 20 | 2026-02-04 | Feature | Per-trade P&L tracking: integrated AnalyticsService into performance dashboard |
+| 21 | 2026-02-04 | Quality | Structured logging in all API routes (10 routes, handleApiError utility) |
 
 ---
 

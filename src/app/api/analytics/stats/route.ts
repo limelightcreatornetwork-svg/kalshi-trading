@@ -9,6 +9,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { analyticsService } from '../history/route';
 import type { StatsTimeFilter } from '@/services/AnalyticsService';
 import { withAuth } from '@/lib/api-auth';
+import { createLogger } from '@/lib/logger';
+
+const log = createLogger('AnalyticsStatsAPI');
 
 export const GET = withAuth(async function GET(request: NextRequest) {
   try {
@@ -126,7 +129,7 @@ export const GET = withAuth(async function GET(request: NextRequest) {
       },
     });
   } catch (error) {
-    console.error('Analytics stats API error:', error);
+    log.error('Analytics stats API error', { error: error instanceof Error ? error.message : String(error) });
     
     const message = error instanceof Error ? error.message : 'Failed to fetch analytics stats';
     return NextResponse.json(

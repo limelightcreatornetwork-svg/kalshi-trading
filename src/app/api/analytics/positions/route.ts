@@ -8,6 +8,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { analyticsService, tradeStorage } from '../history/route';
 import { withAuth } from '@/lib/api-auth';
+import { createLogger } from '@/lib/logger';
+
+const log = createLogger('AnalyticsPositionsAPI');
 
 export const GET = withAuth(async function GET(request: NextRequest) {
   try {
@@ -71,7 +74,7 @@ export const GET = withAuth(async function GET(request: NextRequest) {
       },
     });
   } catch (error) {
-    console.error('Analytics positions API error:', error);
+    log.error('Analytics positions API error', { error: error instanceof Error ? error.message : String(error) });
     
     const message = error instanceof Error ? error.message : 'Failed to fetch position performance';
     return NextResponse.json(
@@ -132,7 +135,7 @@ export const POST = withAuth(async function POST(request: NextRequest) {
       },
     });
   } catch (error) {
-    console.error('Analytics positions POST error:', error);
+    log.error('Analytics positions POST error', { error: error instanceof Error ? error.message : String(error) });
     
     const message = error instanceof Error ? error.message : 'Failed to record trade';
     return NextResponse.json(
@@ -234,7 +237,7 @@ export const PATCH = withAuth(async function PATCH(request: NextRequest) {
       { status: 400 }
     );
   } catch (error) {
-    console.error('Analytics positions PATCH error:', error);
+    log.error('Analytics positions PATCH error', { error: error instanceof Error ? error.message : String(error) });
     
     const message = error instanceof Error ? error.message : 'Failed to update trade';
     return NextResponse.json(

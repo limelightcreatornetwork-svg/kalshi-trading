@@ -17,6 +17,9 @@ import {
 import { withAuth } from '@/lib/api-auth';
 import { getAnalyticsService } from '@/lib/service-factories';
 import { PrismaSnapshotStorage, PrismaTradeStorage } from '@/services/storage/prismaAnalyticsStorage';
+import { createLogger } from '@/lib/logger';
+
+const log = createLogger('AnalyticsHistoryAPI');
 
 const usingDatabase = !!process.env.DATABASE_URL;
 const snapshotStorage = usingDatabase ? new PrismaSnapshotStorage() : new InMemorySnapshotStorage();
@@ -82,7 +85,7 @@ export const GET = withAuth(async function GET(request: NextRequest) {
       },
     });
   } catch (error) {
-    console.error('Analytics history API error:', error);
+    log.error('Analytics history API error', { error: error instanceof Error ? error.message : String(error) });
     
     const message = error instanceof Error ? error.message : 'Failed to fetch analytics history';
     return NextResponse.json(
@@ -130,7 +133,7 @@ export const POST = withAuth(async function POST(request: NextRequest) {
       },
     });
   } catch (error) {
-    console.error('Analytics history POST error:', error);
+    log.error('Analytics history POST error', { error: error instanceof Error ? error.message : String(error) });
     
     const message = error instanceof Error ? error.message : 'Failed to create snapshot';
     return NextResponse.json(

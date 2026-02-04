@@ -8,6 +8,9 @@
 import { NextResponse } from 'next/server';
 import { NextRequest } from 'next/server';
 import { getMarkets, KalshiApiError, Market } from '@/lib/kalshi';
+import { createLogger } from '@/lib/logger';
+
+const log = createLogger('ArbitrageScanLiveAPI');
 import { withAuth } from '@/lib/api-auth';
 
 interface MarketWithArbitrage {
@@ -152,7 +155,7 @@ export const GET = withAuth(async function GET(request: NextRequest) {
       },
     });
   } catch (error) {
-    console.error('Live arbitrage scan error:', error);
+    log.error('Live arbitrage scan error', { error: error instanceof Error ? error.message : String(error) });
     
     if (error instanceof KalshiApiError) {
       return NextResponse.json(

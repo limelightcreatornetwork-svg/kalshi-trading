@@ -4,6 +4,9 @@ import { withAuth } from '@/lib/api-auth';
 import { getDailyPnLService, getAnalyticsService, createUnrealizedPnLServiceWithPositions } from '@/lib/service-factories';
 import { Position } from '@/types/position';
 import type { WinLossStats } from '@/services/AnalyticsService';
+import { createLogger } from '@/lib/logger';
+
+const log = createLogger('PerformanceAPI');
 
 export const GET = withAuth(async function GET() {
   try {
@@ -223,7 +226,7 @@ export const GET = withAuth(async function GET() {
 
     return NextResponse.json(performanceData);
   } catch (error) {
-    console.error('Performance API error:', error);
+    log.error('Performance API error', { error: error instanceof Error ? error.message : String(error) });
     return NextResponse.json(
       { error: 'Failed to fetch live data' },
       { status: 500 }
