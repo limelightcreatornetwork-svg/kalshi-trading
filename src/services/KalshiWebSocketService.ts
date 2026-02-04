@@ -105,7 +105,7 @@ export class KalshiWebSocketService {
   private pendingSubscriptions: ChannelSubscription[] = [];
   
   // Event listeners
-  private listeners: Map<WebSocketEventType, Set<EventListener<any>>> = new Map();
+  private listeners: Map<WebSocketEventType, Set<EventListener<WebSocketEventType>>> = new Map();
 
   constructor(config: WebSocketConfig) {
     this.config = {
@@ -616,7 +616,7 @@ export class KalshiWebSocketService {
     }
     
     const listener: EventListener<T> = { handler, once };
-    this.listeners.get(event)!.add(listener);
+    this.listeners.get(event)!.add(listener as EventListener<WebSocketEventType>);
     
     // Return unsubscribe function
     return () => this.off(event, handler);

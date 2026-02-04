@@ -84,8 +84,6 @@ export class ValueStrategy extends BaseStrategy {
     // Get current market prices
     const yesAsk = context.market.yesAsk;
     const noAsk = context.market.noAsk;
-    const yesBid = context.market.yesBid;
-    const noBid = context.market.noBid;
 
     // Check for YES mispricing (market undervalues YES)
     const yesEdge = fairValue.yes - yesAsk;
@@ -141,7 +139,6 @@ export class ValueStrategy extends BaseStrategy {
     // Simple model: weighted average of different price signals
     const lastPrice = context.market.lastPrice;
     const yesMid = this.getMidPrice(context.market.yesBid, context.market.yesAsk);
-    const noMid = this.getMidPrice(context.market.noBid, context.market.noAsk);
     
     // For demonstration, use simple weighted average
     // In production, this would be a more sophisticated model

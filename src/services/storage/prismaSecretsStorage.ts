@@ -1,7 +1,8 @@
 import { requirePrisma } from '@/lib/prisma';
 import { ApiCredential, SecretsStorage } from '@/services/SecretsService';
+import type { ApiCredential as PrismaApiCredentialRow } from '@prisma/client';
 
-function mapCredential(record: any): ApiCredential {
+function mapCredential(record: PrismaApiCredentialRow): ApiCredential {
   return {
     id: record.id,
     name: record.name,

@@ -6,8 +6,12 @@ import {
   KillSwitchReason,
 } from '@/types/killswitch';
 import { KillSwitchStorage } from '@/services/KillSwitchService';
+import type {
+  KillSwitch as PrismaKillSwitchRow,
+  KillSwitchConfig as PrismaKillSwitchConfigRow,
+} from '@prisma/client';
 
-function mapKillSwitch(record: any): KillSwitch {
+function mapKillSwitch(record: PrismaKillSwitchRow): KillSwitch {
   return {
     id: record.id,
     level: record.level as KillSwitchLevel,
@@ -25,7 +29,7 @@ function mapKillSwitch(record: any): KillSwitch {
   };
 }
 
-function mapKillSwitchConfig(record: any): KillSwitchConfig {
+function mapKillSwitchConfig(record: PrismaKillSwitchConfigRow): KillSwitchConfig {
   return {
     id: record.id,
     level: record.level as KillSwitchLevel,

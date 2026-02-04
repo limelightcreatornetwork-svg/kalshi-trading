@@ -1,6 +1,6 @@
 // Strategy Types - Plugin interface for trading strategies
 
-import { Thesis, ThesisEvaluation } from './thesis';
+import { Thesis } from './thesis';
 
 export enum StrategyType {
   VALUE = 'VALUE',                 // Mispricing detection

@@ -1131,7 +1131,7 @@ describe('KalshiWebSocketService', () => {
       errorService.on('error', onError);
 
       // Override MockWebSocket to error instead of connect
-      const originalTimeout = MockWebSocket.prototype.constructor;
+      const _originalTimeout = MockWebSocket.prototype.constructor;
       const connectPromise = errorService.connect();
 
       // Simulate error before open

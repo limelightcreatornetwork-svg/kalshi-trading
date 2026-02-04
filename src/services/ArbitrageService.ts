@@ -3,20 +3,19 @@
 
 import { v4 as uuid } from 'uuid';
 import { getMarkets, createOrder, cancelOrder, Market } from '@/lib/kalshi';
-import type { 
-  ArbitrageOpportunity, 
-  ArbitrageScanResult, 
+import type {
+  ArbitrageOpportunity,
+  ArbitrageScanResult,
   MarketWithArbitrage,
   ArbitrageExecuteRequest,
-  ArbitrageExecuteResult
+  ArbitrageExecuteResult,
+  ArbitrageType,
+  ArbitrageStatus,
 } from '@/types/arbitrage';
 import prisma from '@/lib/prisma';
 
 // Minimum profit in cents to consider an opportunity worth tracking
 const MIN_PROFIT_CENTS = 0.5;
-
-// Minimum profit percentage to consider
-const MIN_PROFIT_PERCENT = 0.5;
 
 // In-memory fallback storage (used when database is not available)
 const inMemoryStore = {
@@ -325,8 +324,8 @@ export class ArbitrageService {
     if (this.isDatabaseAvailable()) {
       const opportunities = await prisma!.arbitrageOpportunity.findMany({
         where: {
-          ...(params?.type && { type: params.type as any }),
-          ...(params?.status && { status: params.status as any }),
+          ...(params?.type && { type: params.type as ArbitrageType }),
+          ...(params?.status && { status: params.status as ArbitrageStatus }),
           ...(params?.minProfitCents && { profitCents: { gte: params.minProfitCents } }),
         },
         orderBy: { detectedAt: 'desc' },
@@ -405,7 +404,7 @@ export class ArbitrageService {
         // Critical: YES order succeeded but NO order failed - cancel YES to avoid unhedged position
         try {
           await cancelOrder(yesOrder.order.order_id);
-        } catch (cancelError) {
+        } catch (_cancelError) {
           // If cancel also fails, we have an unhedged position - rethrow with context
           const msg = `CRITICAL: NO order failed and YES order ${yesOrder.order.order_id} cancel also failed. Manual intervention required.`;
           throw new Error(msg);
@@ -563,15 +562,15 @@ export class ArbitrageService {
   /**
    * Map database model to API type
    */
-  private mapDbToOpportunity(db: any): ArbitrageOpportunity {
+  private mapDbToOpportunity(db: Record<string, unknown>): ArbitrageOpportunity {
     return {
-      id: db.id,
-      type: db.type,
-      status: db.status,
-      marketTicker: db.marketTicker,
-      marketTitle: db.marketTitle,
-      relatedMarketTicker: db.relatedMarketTicker || undefined,
-      relatedMarketTitle: db.relatedMarketTitle || undefined,
+      id: db.id as string,
+      type: db.type as ArbitrageType,
+      status: db.status as ArbitrageStatus,
+      marketTicker: db.marketTicker as string,
+      marketTitle: db.marketTitle as string,
+      relatedMarketTicker: (db.relatedMarketTicker as string | null) || undefined,
+      relatedMarketTitle: (db.relatedMarketTitle as string | null) || undefined,
       yesBid: Number(db.yesBid),
       yesAsk: Number(db.yesAsk),
       noBid: Number(db.noBid),
@@ -580,16 +579,16 @@ export class ArbitrageService {
       guaranteedPayout: Number(db.guaranteedPayout),
       profitCents: Number(db.profitCents),
       profitPercent: Number(db.profitPercent),
-      maxContracts: db.maxContracts || undefined,
-      estimatedMaxProfit: db.estimatedMaxProfit ? Number(db.estimatedMaxProfit) : undefined,
-      executedAt: db.executedAt?.toISOString(),
-      executedContracts: db.executedContracts || undefined,
-      actualProfit: db.actualProfit ? Number(db.actualProfit) : undefined,
-      alertSent: db.alertSent,
-      alertSentAt: db.alertSentAt?.toISOString(),
-      detectedAt: db.detectedAt.toISOString(),
-      lastSeenAt: db.lastSeenAt.toISOString(),
-      expiredAt: db.expiredAt?.toISOString(),
+      maxContracts: db.maxContracts != null ? Number(db.maxContracts) : undefined,
+      estimatedMaxProfit: db.estimatedMaxProfit != null ? Number(db.estimatedMaxProfit) : undefined,
+      executedAt: db.executedAt ? (db.executedAt as Date).toISOString() : undefined,
+      executedContracts: db.executedContracts != null ? Number(db.executedContracts) : undefined,
+      actualProfit: db.actualProfit != null ? Number(db.actualProfit) : undefined,
+      alertSent: (db.alertSent as boolean) ?? false,
+      alertSentAt: db.alertSentAt ? (db.alertSentAt as Date).toISOString() : undefined,
+      detectedAt: (db.detectedAt as Date).toISOString(),
+      lastSeenAt: (db.lastSeenAt as Date).toISOString(),
+      expiredAt: db.expiredAt ? (db.expiredAt as Date).toISOString() : undefined,
     };
   }
 }

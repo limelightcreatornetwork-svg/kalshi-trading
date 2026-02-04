@@ -133,7 +133,7 @@ export abstract class BaseStrategy implements Strategy {
   }
 
   // Override for custom event handling
-  protected async onCustomEvent(event: StrategyEvent): Promise<void> {}
+  protected async onCustomEvent(_event: StrategyEvent): Promise<void> {}
 
   getState(): StrategyState {
     return { ...this.state };

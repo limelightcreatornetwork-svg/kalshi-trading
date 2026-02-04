@@ -8,11 +8,10 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { 
-  AnalyticsService, 
-  InMemorySnapshotStorage, 
+import {
+  AnalyticsService,
+  InMemorySnapshotStorage,
   InMemoryTradeStorage,
-  type DailySnapshot,
 } from '@/services/AnalyticsService';
 import { withAuth } from '@/lib/api-auth';
 import { getAnalyticsService } from '@/lib/service-factories';

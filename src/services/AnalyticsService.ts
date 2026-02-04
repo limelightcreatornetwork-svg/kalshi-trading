@@ -749,7 +749,6 @@ export class AnalyticsService {
     // Annualize (assuming 252 trading days)
     const annualizedReturn = avgReturn * 252;
     const annualizedStdDev = stdDev * Math.sqrt(252);
-    const dailyRiskFreeRate = this.config.riskFreeRate / 252;
     const annualizedExcessReturn = annualizedReturn - this.config.riskFreeRate;
 
     // Sharpe = (Return - RiskFreeRate) / StdDev

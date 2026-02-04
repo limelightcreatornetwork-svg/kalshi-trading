@@ -3,7 +3,7 @@ import { ArbitrageService } from '../services/ArbitrageService';
 import type { Market } from '../lib/kalshi';
 
 // Hoisted mock storage and instance
-const { mockOpportunities, mockScans, mockAlertConfig, mockPrismaInstance } = vi.hoisted(() => {
+const { mockOpportunities, mockScans, mockAlertConfig: _mockAlertConfig, mockPrismaInstance } = vi.hoisted(() => {
   const mockOpportunities: Map<string, any> = new Map();
   const mockScans: any[] = [];
   const mockAlertConfig = { isActive: true, alertEnabled: true, minProfitCents: 1, minProfitPercent: 1 };
@@ -943,7 +943,7 @@ describe('ArbitrageService - Database Methods', () => {
         expiredAt: null,
       });
 
-      const result = await service.getActiveOpportunities();
+      const _result = await service.getActiveOpportunities();
       // Won't find it since it's EXECUTED, so use history
       const history = await service.getOpportunityHistory({ status: 'EXECUTED' });
 

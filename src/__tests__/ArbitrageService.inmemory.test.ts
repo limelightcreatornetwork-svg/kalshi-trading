@@ -52,7 +52,7 @@ describe('ArbitrageService - In-Memory Fallback', () => {
     // Clear any leftover in-memory state by getting and understanding what's there
     // We'll just work with fresh service instances and accept accumulation
     // The cleanest approach: reset via dynamic import
-    const mod = await import('../services/ArbitrageService');
+    const _mod = await import('../services/ArbitrageService');
     // Access the internal store indirectly - clear opportunities via getActiveOpportunities
     // Actually, we can't easily clear the module-level Map.
     // Best approach: each test uses unique tickers to avoid collisions.

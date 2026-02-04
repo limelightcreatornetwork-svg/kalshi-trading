@@ -6,7 +6,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { analyticsService, tradeStorage } from '../history/route';
+import { analyticsService } from '../history/route';
 import { withAuth } from '@/lib/api-auth';
 import { createLogger } from '@/lib/logger';
 

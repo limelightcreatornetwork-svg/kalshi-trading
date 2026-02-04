@@ -1,14 +1,13 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { clearStoredApiKey, getStoredApiKey, setStoredApiKey } from '@/lib/client-api';
 
 export default function ApiKeyControl() {
-  const [hasKey, setHasKey] = useState(false);
-
-  useEffect(() => {
-    setHasKey(!!getStoredApiKey());
-  }, []);
+  const [hasKey, setHasKey] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    return !!getStoredApiKey();
+  });
 
   const handleSetKey = () => {
     const value = window.prompt('Enter API key for dashboard requests');

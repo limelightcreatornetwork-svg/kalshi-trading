@@ -26,7 +26,7 @@ class TestStrategy extends BaseStrategy {
     );
   }
 
-  async generateSignals(context: StrategyContext): Promise<Signal[]> {
+  async generateSignals(_context: StrategyContext): Promise<Signal[]> {
     return this.signals;
   }
 

@@ -2,9 +2,8 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
-import type { 
-  Forecast, 
-  EdgeOpportunity, 
+import type {
+  EdgeOpportunity,
   ForecastingSummary,
   ForecastingConfig,
 } from '@/types/forecasting';
@@ -24,8 +23,6 @@ export default function ForecastingPage() {
   const [selectedModel, setSelectedModel] = useState('ensemble-v1');
   const [bankroll, setBankroll] = useState(1000);
   const [minEdge, setMinEdge] = useState(0.03);
-  const [showAllForecasts, setShowAllForecasts] = useState(false);
-
   const fetchData = useCallback(async () => {
     setLoading(true);
     setError(null);

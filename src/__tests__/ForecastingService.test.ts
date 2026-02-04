@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { ForecastingService, createForecastingService } from '../services/ForecastingService';
 import type { Market } from '../lib/kalshi';
-import type { ForecastModel, ForecastModelType, ForecastModelInput } from '../types/forecasting';
+import type { ForecastModel, ForecastModelType } from '../types/forecasting';
 
 // ============================================================================
 // Test Fixtures
@@ -46,7 +46,7 @@ const createLowLiquidityMarket = (): Market =>
     no_ask: 55,
   });
 
-const createExtremeMarket = (): Market =>
+const _createExtremeMarket = (): Market =>
   createMockMarket({
     ticker: 'EXTREME-MKT',
     yes_bid: 90,

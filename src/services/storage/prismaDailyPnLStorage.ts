@@ -1,11 +1,12 @@
 import { requirePrisma } from '@/lib/prisma';
 import { DailyPnL, PnLStorage } from '@/services/DailyPnLService';
+import type { DailyPnL as PrismaDailyPnLRow } from '@prisma/client';
 
 function dateToKey(date: string): Date {
   return new Date(`${date}T00:00:00.000Z`);
 }
 
-function mapDailyPnL(record: any): DailyPnL {
+function mapDailyPnL(record: PrismaDailyPnLRow): DailyPnL {
   const date = record.date instanceof Date
     ? record.date.toISOString().split('T')[0]
     : record.date;

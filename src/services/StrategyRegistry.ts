@@ -6,7 +6,6 @@ import {
   StrategyType,
   StrategyStatus,
   StrategyConfig,
-  StrategyState,
   StrategyRegistration,
   StrategyContext,
   StrategyEvent,
@@ -433,7 +432,7 @@ export class StrategyRegistry {
     const now = Date.now();
     let removed = 0;
 
-    for (const [id, signal] of this.pendingSignals) {
+    for (const [_id, signal] of this.pendingSignals) {
       const age = now - signal.createdAt.getTime();
       if (age > this.config.signalExpiryMs && signal.status === SignalStatus.PENDING) {
         signal.status = SignalStatus.EXPIRED;

@@ -5,12 +5,16 @@ import {
   TradeHistory,
   TradeStorage,
 } from '@/services/AnalyticsService';
+import type {
+  DailySnapshot as PrismaDailySnapshotRow,
+  TradeHistory as PrismaTradeHistoryRow,
+} from '@prisma/client';
 
 function dateToKey(date: string): Date {
   return new Date(`${date}T00:00:00.000Z`);
 }
 
-function mapSnapshot(record: any): DailySnapshot {
+function mapSnapshot(record: PrismaDailySnapshotRow): DailySnapshot {
   const date = record.date instanceof Date
     ? record.date.toISOString().split('T')[0]
     : record.date;
@@ -34,7 +38,7 @@ function mapSnapshot(record: any): DailySnapshot {
   };
 }
 
-function mapTrade(record: any): TradeHistory {
+function mapTrade(record: PrismaTradeHistoryRow): TradeHistory {
   return {
     id: record.id,
     marketTicker: record.marketTicker,

@@ -2,7 +2,6 @@
 // Orchestrates strategy lifecycle: signal generation, risk checks, order execution
 
 import {
-  StrategyConfig,
   StrategyContext,
   StrategyEvent,
   StrategyEventType,

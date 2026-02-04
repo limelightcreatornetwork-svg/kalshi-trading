@@ -22,10 +22,10 @@ import {
   createStrategyRegistry,
 } from '../helpers/test-factories';
 import { ThesisStatus } from '../../types/thesis';
-import { KillSwitchLevel, KillSwitchReason } from '../../types/killswitch';
+import type {} from '../../types/killswitch';
 import { OrderStatus, OrderSide, OrderType, TimeInForce } from '../../types/order';
-import { StrategyType, StrategyStatus, SignalType, SignalStatus } from '../../types/strategy';
-import { ValueStrategy, createValueStrategy } from '../../services/strategies/ValueStrategy';
+import { StrategyType, StrategyStatus } from '../../types/strategy';
+import { createValueStrategy } from '../../services/strategies/ValueStrategy';
 
 describe('E2E: Full Trading Flow', () => {
   let thesisService: ThesisService;

@@ -220,7 +220,7 @@ export default function PerformanceDashboard() {
           <CardContent>
             {/* Simple ASCII-style chart */}
             <div className="h-48 flex items-end gap-1">
-              {filteredPnl.map((day, i) => {
+              {filteredPnl.map((day) => {
                 const height = ((day.cumulative - minPnl) / range) * 100;
                 const isPositiveDay = day.netPnl >= 0;
                 return (
@@ -393,7 +393,7 @@ export default function PerformanceDashboard() {
                       {trade.quantity} @ ${trade.price.toFixed(2)}
                     </p>
                     <p className="text-xs text-zinc-500 italic">
-                      "{trade.thesis}"
+                      &ldquo;{trade.thesis}&rdquo;
                     </p>
                   </div>
                 ))
