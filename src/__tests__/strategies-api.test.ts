@@ -274,6 +274,118 @@ describe('Strategies API', () => {
     });
   });
 
+  // ─── Error Handling ──────────────────────────────────────────
+
+  describe('error handling', () => {
+    it('GET should return 500 on service error', async () => {
+      const service = getStrategyManagementService();
+      vi.spyOn(service, 'listStrategies').mockRejectedValueOnce(new Error('DB connection failed'));
+
+      const request = createRequest('http://localhost:3000/api/strategies');
+      const response = await GET(request);
+      const data = await response.json();
+
+      expect(response.status).toBe(500);
+      expect(data.success).toBe(false);
+      expect(data.error).toBe('DB connection failed');
+    });
+
+    it('POST should return 500 on service error', async () => {
+      const service = getStrategyManagementService();
+      vi.spyOn(service, 'createStrategy').mockRejectedValueOnce(new Error('Storage write failed'));
+
+      const request = createRequest('http://localhost:3000/api/strategies', {
+        method: 'POST',
+        body: { name: 'Test', type: 'VALUE' },
+      });
+      const response = await POST(request);
+      const data = await response.json();
+
+      expect(response.status).toBe(500);
+      expect(data.success).toBe(false);
+      expect(data.error).toBe('Storage write failed');
+    });
+
+    it('PATCH should return 500 on service error', async () => {
+      const service = getStrategyManagementService();
+      const created = await service.createStrategy({ name: 'Test', type: 'VALUE' as any });
+      vi.spyOn(service, 'updateStrategy').mockRejectedValueOnce(new Error('Update conflict'));
+
+      const request = createRequest('http://localhost:3000/api/strategies', {
+        method: 'PATCH',
+        body: { id: created.config.id, name: 'Updated' },
+      });
+      const response = await PATCH(request);
+      const data = await response.json();
+
+      expect(response.status).toBe(500);
+      expect(data.success).toBe(false);
+      expect(data.error).toBe('Update conflict');
+    });
+
+    it('DELETE should return 500 when deleteStrategy throws', async () => {
+      const service = getStrategyManagementService();
+      const created = await service.createStrategy({ name: 'Test', type: 'VALUE' as any, enabled: true });
+      // Update state to ACTIVE so deleteStrategy will throw
+      await service.updateState(created.config.id, { status: 'ACTIVE' as any });
+
+      const request = createRequest(`http://localhost:3000/api/strategies?id=${created.config.id}`, {
+        method: 'DELETE',
+      });
+      const response = await DELETE(request);
+      const data = await response.json();
+
+      expect(response.status).toBe(500);
+      expect(data.success).toBe(false);
+      expect(data.error).toContain('active strategy');
+    });
+
+    it('POST should handle non-Error throws with fallback message', async () => {
+      const service = getStrategyManagementService();
+      vi.spyOn(service, 'createStrategy').mockRejectedValueOnce('raw string error');
+
+      const request = createRequest('http://localhost:3000/api/strategies', {
+        method: 'POST',
+        body: { name: 'Test', type: 'VALUE' },
+      });
+      const response = await POST(request);
+      const data = await response.json();
+
+      expect(response.status).toBe(500);
+      expect(data.success).toBe(false);
+      expect(data.error).toBe('Failed to create strategy');
+    });
+  });
+
+  // ─── GET Filter Edge Cases ─────────────────────────────────────
+
+  describe('GET filter edge cases', () => {
+    it('should filter by enabled=false', async () => {
+      const service = getStrategyManagementService();
+      await service.createStrategy({ name: 'Enabled', type: 'VALUE' as any, enabled: true });
+      await service.createStrategy({ name: 'Disabled', type: 'VALUE' as any, enabled: false });
+
+      const request = createRequest('http://localhost:3000/api/strategies?enabled=false');
+      const response = await GET(request);
+      const data = await response.json();
+
+      expect(data.data.strategies).toHaveLength(1);
+      expect(data.data.strategies[0].name).toBe('Disabled');
+    });
+
+    it('should ignore invalid type param', async () => {
+      const service = getStrategyManagementService();
+      await service.createStrategy({ name: 'Test', type: 'VALUE' as any });
+
+      const request = createRequest('http://localhost:3000/api/strategies?type=INVALID');
+      const response = await GET(request);
+      const data = await response.json();
+
+      // Invalid type ignored, returns all strategies
+      expect(data.data.strategies).toHaveLength(1);
+    });
+  });
+
   // ─── Response Format ──────────────────────────────────────────
 
   describe('response format', () => {
