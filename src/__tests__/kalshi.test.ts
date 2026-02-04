@@ -404,6 +404,225 @@ describe('Kalshi API Client', () => {
     });
   });
 
+  describe('Retry-After Header Handling', () => {
+    it('should respect Retry-After header with seconds value on 429', async () => {
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: false,
+          status: 429,
+          statusText: 'Too Many Requests',
+          headers: new Headers({ 'Retry-After': '2' }),
+          json: () => Promise.resolve({ message: 'Rate limited' }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve({ balance: 10000, portfolio_value: 5000, updated_ts: 123 }),
+        });
+
+      const { getBalance } = await import('../lib/kalshi');
+      const result = await getBalance();
+
+      expect(result.balance).toBe(10000);
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+    });
+
+    it('should handle Retry-After header with HTTP-date format', async () => {
+      const futureDate = new Date(Date.now() + 1000).toUTCString();
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: false,
+          status: 429,
+          statusText: 'Too Many Requests',
+          headers: new Headers({ 'Retry-After': futureDate }),
+          json: () => Promise.resolve({ message: 'Rate limited' }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve({ balance: 10000, portfolio_value: 5000, updated_ts: 123 }),
+        });
+
+      const { getBalance } = await import('../lib/kalshi');
+      const result = await getBalance();
+
+      expect(result.balance).toBe(10000);
+    });
+
+    it('should handle missing Retry-After header on 429', async () => {
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: false,
+          status: 429,
+          statusText: 'Too Many Requests',
+          headers: new Headers(),
+          json: () => Promise.resolve({ message: 'Rate limited' }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve({ balance: 10000, portfolio_value: 5000, updated_ts: 123 }),
+        });
+
+      const { getBalance } = await import('../lib/kalshi');
+      const result = await getBalance();
+
+      expect(result.balance).toBe(10000);
+    });
+  });
+
+  describe('Timeout Handling', () => {
+    it('should retry on AbortError (timeout)', async () => {
+      const abortError = new DOMException('The operation was aborted', 'AbortError');
+      mockFetch
+        .mockRejectedValueOnce(abortError)
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve({ balance: 10000, portfolio_value: 5000, updated_ts: 123 }),
+        });
+
+      const { getBalance } = await import('../lib/kalshi');
+      const result = await getBalance();
+
+      expect(result.balance).toBe(10000);
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+    });
+
+    it('should throw timeout error after max retries of AbortError', async () => {
+      const abortError = new DOMException('The operation was aborted', 'AbortError');
+      mockFetch.mockRejectedValue(abortError);
+
+      const { getBalance } = await import('../lib/kalshi');
+      await expect(getBalance()).rejects.toThrow('Request timeout');
+    });
+  });
+
+  describe('Network Error Handling', () => {
+    it('should retry on TypeError (network error)', async () => {
+      mockFetch
+        .mockRejectedValueOnce(new TypeError('fetch failed'))
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve({ balance: 10000, portfolio_value: 5000, updated_ts: 123 }),
+        });
+
+      const { getBalance } = await import('../lib/kalshi');
+      const result = await getBalance();
+
+      expect(result.balance).toBe(10000);
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+    });
+
+    it('should fail after max retries of network errors', async () => {
+      mockFetch.mockRejectedValue(new TypeError('fetch failed'));
+
+      const { getBalance } = await import('../lib/kalshi');
+      await expect(getBalance()).rejects.toThrow();
+    });
+  });
+
+  describe('createOrder - Additional Fields', () => {
+    it('should include no_price when provided', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ order: { order_id: 'test' } }),
+      });
+
+      const { createOrder } = await import('../lib/kalshi');
+      await createOrder({
+        ticker: 'TEST',
+        side: 'no',
+        action: 'buy',
+        type: 'limit',
+        count: 5,
+        no_price: 40,
+      });
+
+      const [, options] = mockFetch.mock.calls[0];
+      const body = JSON.parse(options.body);
+      expect(body.no_price).toBe(40);
+      expect(body.yes_price).toBeUndefined();
+    });
+
+    it('should include time_in_force and expiration_ts', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ order: { order_id: 'test' } }),
+      });
+
+      const { createOrder } = await import('../lib/kalshi');
+      await createOrder({
+        ticker: 'TEST',
+        side: 'yes',
+        action: 'buy',
+        type: 'limit',
+        count: 5,
+        yes_price: 50,
+        time_in_force: 'gtd',
+        expiration_ts: 1700000000,
+      });
+
+      const [, options] = mockFetch.mock.calls[0];
+      const body = JSON.parse(options.body);
+      expect(body.time_in_force).toBe('gtd');
+      expect(body.expiration_ts).toBe(1700000000);
+    });
+  });
+
+  describe('Query Parameters', () => {
+    it('should build getMarkets query with cursor and series_ticker', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ markets: [], cursor: null }),
+      });
+
+      const { getMarkets } = await import('../lib/kalshi');
+      await getMarkets({ cursor: 'abc123', series_ticker: 'SERIES-A', tickers: 'T1,T2' });
+
+      const [url] = mockFetch.mock.calls[0];
+      expect(url).toContain('cursor=abc123');
+      expect(url).toContain('series_ticker=SERIES-A');
+      expect(url).toContain('tickers=');
+    });
+
+    it('should build getPositions query with all params', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ market_positions: [], event_positions: [] }),
+      });
+
+      const { getPositions } = await import('../lib/kalshi');
+      await getPositions({
+        limit: 50,
+        cursor: 'pos-cursor',
+        event_ticker: 'EVT-1',
+      });
+
+      const [url] = mockFetch.mock.calls[0];
+      expect(url).toContain('limit=50');
+      expect(url).toContain('cursor=pos-cursor');
+      expect(url).toContain('event_ticker=EVT-1');
+    });
+
+    it('should build getOrders query with all params', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ orders: [] }),
+      });
+
+      const { getOrders } = await import('../lib/kalshi');
+      await getOrders({
+        limit: 25,
+        cursor: 'ord-cursor',
+        ticker: 'MKT-1',
+        status: 'resting',
+      });
+
+      const [url] = mockFetch.mock.calls[0];
+      expect(url).toContain('limit=25');
+      expect(url).toContain('cursor=ord-cursor');
+      expect(url).toContain('ticker=MKT-1');
+      expect(url).toContain('status=resting');
+    });
+  });
+
   describe('KalshiApiError', () => {
     it('should have correct properties', async () => {
       const { KalshiApiError } = await import('../lib/kalshi');
