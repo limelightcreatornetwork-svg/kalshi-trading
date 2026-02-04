@@ -1,30 +1,58 @@
-// Prisma Client Singleton with Neon Adapter (Prisma 7+)
+// Prisma Client Singleton with graceful fallback
+// If DATABASE_URL is not configured or connection fails, operations will use in-memory fallback
+
 import { PrismaClient } from '@prisma/client';
-import { PrismaNeon } from '@prisma/adapter-neon';
 
 // PrismaClient is attached to the `global` object in development to prevent
 // exhausting your database connection limit.
 // Learn more: https://pris.ly/d/help/next-js-best-practices
 
 const globalForPrisma = globalThis as unknown as {
-  prisma: PrismaClient | undefined;
+  prisma: PrismaClient | null | undefined;
+  prismaInitialized: boolean;
 };
 
-// Only initialize PrismaClient if DATABASE_URL is configured
-const isDatabaseConfigured = !!process.env.DATABASE_URL;
-
-function createPrismaClient(): PrismaClient {
-  const connectionString = process.env.DATABASE_URL!;
-  const adapter = new PrismaNeon({ connectionString });
-  return new PrismaClient({ adapter });
+// Check if DATABASE_URL looks like a valid PostgreSQL connection string
+function isValidPostgresUrl(url: string | undefined): boolean {
+  if (!url) return false;
+  // Should start with postgres:// or postgresql://
+  return url.startsWith('postgres://') || url.startsWith('postgresql://');
 }
 
-export const prisma: PrismaClient | null = isDatabaseConfigured
-  ? globalForPrisma.prisma ?? createPrismaClient()
-  : null;
+function createPrismaClient(): PrismaClient | null {
+  const connectionString = process.env.DATABASE_URL;
+  
+  if (!isValidPostgresUrl(connectionString)) {
+    console.warn('[Prisma] DATABASE_URL not configured or not a PostgreSQL URL. Database operations will use in-memory fallback.');
+    return null;
+  }
+  
+  try {
+    // For Neon serverless, we'd use the adapter, but for simplicity we'll use direct connection
+    // This can be enhanced later with proper Neon adapter setup
+    return new PrismaClient({
+      datasources: {
+        db: {
+          url: connectionString,
+        },
+      },
+    });
+  } catch (error) {
+    console.error('[Prisma] Failed to initialize PrismaClient:', error);
+    return null;
+  }
+}
 
-if (isDatabaseConfigured && process.env.NODE_ENV !== 'production') {
-  globalForPrisma.prisma = prisma!;
+// Initialize only once
+if (!globalForPrisma.prismaInitialized) {
+  globalForPrisma.prisma = createPrismaClient();
+  globalForPrisma.prismaInitialized = true;
+}
+
+export const prisma: PrismaClient | null = globalForPrisma.prisma ?? null;
+
+if (prisma && process.env.NODE_ENV !== 'production') {
+  globalForPrisma.prisma = prisma;
 }
 
 export default prisma;
@@ -35,7 +63,14 @@ export default prisma;
  */
 export function requirePrisma(): PrismaClient {
   if (!prisma) {
-    throw new Error('Database not configured. Set DATABASE_URL in .env');
+    throw new Error('Database not configured. Set DATABASE_URL with a valid PostgreSQL connection string in .env');
   }
   return prisma;
+}
+
+/**
+ * Check if prisma is available
+ */
+export function isPrismaAvailable(): boolean {
+  return prisma !== null;
 }

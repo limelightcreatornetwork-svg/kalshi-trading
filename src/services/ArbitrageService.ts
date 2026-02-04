@@ -10,7 +10,7 @@ import type {
   ArbitrageExecuteRequest,
   ArbitrageExecuteResult
 } from '@/types/arbitrage';
-import { requirePrisma } from '@/lib/prisma';
+import prisma from '@/lib/prisma';
 
 // Minimum profit in cents to consider an opportunity worth tracking
 const MIN_PROFIT_CENTS = 0.5;
@@ -18,7 +18,20 @@ const MIN_PROFIT_CENTS = 0.5;
 // Minimum profit percentage to consider
 const MIN_PROFIT_PERCENT = 0.5;
 
+// In-memory fallback storage (used when database is not available)
+const inMemoryStore = {
+  opportunities: new Map<string, ArbitrageOpportunity>(),
+  scans: [] as { marketsScanned: number; opportunitiesFound: number; totalProfitPotential: number; scanDurationMs: number; completedAt: Date }[],
+};
+
 export class ArbitrageService {
+  /**
+   * Check if database is available
+   */
+  private isDatabaseAvailable(): boolean {
+    return prisma !== null;
+  }
+
   /**
    * Scan all active markets for arbitrage opportunities
    * 
@@ -67,15 +80,26 @@ export class ArbitrageService {
     const totalProfitPotential = opportunities.reduce((sum, o) => sum + o.profitCents, 0);
     
     // Record the scan
-    await requirePrisma().arbitrageScan.create({
-      data: {
+    if (this.isDatabaseAvailable()) {
+      await prisma!.arbitrageScan.create({
+        data: {
+          marketsScanned: totalMarketsScanned,
+          opportunitiesFound: opportunities.length,
+          totalProfitPotential,
+          scanDurationMs,
+          completedAt: new Date(),
+        },
+      });
+    } else {
+      // Fallback to in-memory
+      inMemoryStore.scans.push({
         marketsScanned: totalMarketsScanned,
         opportunitiesFound: opportunities.length,
         totalProfitPotential,
         scanDurationMs,
         completedAt: new Date(),
-      },
-    });
+      });
+    }
     
     return {
       scanId,
@@ -141,52 +165,99 @@ export class ArbitrageService {
     analysis: MarketWithArbitrage,
     market: Market
   ): Promise<ArbitrageOpportunity> {
-    // Check if we already have an active opportunity for this market
-    const existing = await requirePrisma().arbitrageOpportunity.findFirst({
-      where: {
-        marketTicker: market.ticker,
-        status: 'ACTIVE',
-      },
-    });
+    const now = new Date();
     
-    if (existing) {
-      // Update the existing opportunity
-      const updated = await requirePrisma().arbitrageOpportunity.update({
-        where: { id: existing.id },
+    if (this.isDatabaseAvailable()) {
+      // Check if we already have an active opportunity for this market
+      const existing = await prisma!.arbitrageOpportunity.findFirst({
+        where: {
+          marketTicker: market.ticker,
+          status: 'ACTIVE',
+        },
+      });
+      
+      if (existing) {
+        // Update the existing opportunity
+        const updated = await prisma!.arbitrageOpportunity.update({
+          where: { id: existing.id },
+          data: {
+            yesBid: analysis.yesBid,
+            yesAsk: analysis.yesAsk,
+            noBid: analysis.noBid,
+            noAsk: analysis.noAsk,
+            totalCost: analysis.buyBothCost,
+            profitCents: analysis.profitCents,
+            profitPercent: analysis.profitPercent,
+            lastSeenAt: new Date(),
+          },
+        });
+        
+        return this.mapDbToOpportunity(updated);
+      }
+      
+      // Create new opportunity
+      const created = await prisma!.arbitrageOpportunity.create({
         data: {
+          type: 'SINGLE_MARKET',
+          status: 'ACTIVE',
+          marketTicker: market.ticker,
+          marketTitle: market.title,
           yesBid: analysis.yesBid,
           yesAsk: analysis.yesAsk,
           noBid: analysis.noBid,
           noAsk: analysis.noAsk,
           totalCost: analysis.buyBothCost,
+          guaranteedPayout: 100,
           profitCents: analysis.profitCents,
           profitPercent: analysis.profitPercent,
-          lastSeenAt: new Date(),
         },
       });
       
-      return this.mapDbToOpportunity(updated);
+      return this.mapDbToOpportunity(created);
     }
     
-    // Create new opportunity
-    const created = await requirePrisma().arbitrageOpportunity.create({
-      data: {
-        type: 'SINGLE_MARKET',
-        status: 'ACTIVE',
-        marketTicker: market.ticker,
-        marketTitle: market.title,
+    // Fallback to in-memory
+    const existingKey = Array.from(inMemoryStore.opportunities.entries())
+      .find(([, o]) => o.marketTicker === market.ticker && o.status === 'ACTIVE')?.[0];
+    
+    if (existingKey) {
+      const existing = inMemoryStore.opportunities.get(existingKey)!;
+      const updated: ArbitrageOpportunity = {
+        ...existing,
         yesBid: analysis.yesBid,
         yesAsk: analysis.yesAsk,
         noBid: analysis.noBid,
         noAsk: analysis.noAsk,
         totalCost: analysis.buyBothCost,
-        guaranteedPayout: 100,
         profitCents: analysis.profitCents,
         profitPercent: analysis.profitPercent,
-      },
-    });
+        lastSeenAt: now.toISOString(),
+      };
+      inMemoryStore.opportunities.set(existingKey, updated);
+      return updated;
+    }
     
-    return this.mapDbToOpportunity(created);
+    // Create new in-memory opportunity
+    const newOpportunity: ArbitrageOpportunity = {
+      id: uuid(),
+      type: 'SINGLE_MARKET',
+      status: 'ACTIVE',
+      marketTicker: market.ticker,
+      marketTitle: market.title,
+      yesBid: analysis.yesBid,
+      yesAsk: analysis.yesAsk,
+      noBid: analysis.noBid,
+      noAsk: analysis.noAsk,
+      totalCost: analysis.buyBothCost,
+      guaranteedPayout: 100,
+      profitCents: analysis.profitCents,
+      profitPercent: analysis.profitPercent,
+      alertSent: false,
+      detectedAt: now.toISOString(),
+      lastSeenAt: now.toISOString(),
+    };
+    inMemoryStore.opportunities.set(newOpportunity.id, newOpportunity);
+    return newOpportunity;
   }
   
   /**
@@ -195,29 +266,51 @@ export class ArbitrageService {
   private async markStaleOpportunities(activeIds: string[]): Promise<void> {
     const staleThreshold = new Date(Date.now() - 5 * 60 * 1000); // 5 minutes
     
-    await requirePrisma().arbitrageOpportunity.updateMany({
-      where: {
-        status: 'ACTIVE',
-        lastSeenAt: { lt: staleThreshold },
-        id: { notIn: activeIds },
-      },
-      data: {
-        status: 'EXPIRED',
-        expiredAt: new Date(),
-      },
-    });
+    if (this.isDatabaseAvailable()) {
+      await prisma!.arbitrageOpportunity.updateMany({
+        where: {
+          status: 'ACTIVE',
+          lastSeenAt: { lt: staleThreshold },
+          id: { notIn: activeIds },
+        },
+        data: {
+          status: 'EXPIRED',
+          expiredAt: new Date(),
+        },
+      });
+    } else {
+      // Fallback to in-memory
+      for (const [id, opp] of inMemoryStore.opportunities) {
+        if (opp.status === 'ACTIVE' && 
+            !activeIds.includes(id) && 
+            new Date(opp.lastSeenAt) < staleThreshold) {
+          inMemoryStore.opportunities.set(id, {
+            ...opp,
+            status: 'EXPIRED',
+            expiredAt: new Date().toISOString(),
+          });
+        }
+      }
+    }
   }
   
   /**
    * Get all active opportunities
    */
   async getActiveOpportunities(): Promise<ArbitrageOpportunity[]> {
-    const opportunities = await requirePrisma().arbitrageOpportunity.findMany({
-      where: { status: 'ACTIVE' },
-      orderBy: { profitCents: 'desc' },
-    });
+    if (this.isDatabaseAvailable()) {
+      const opportunities = await prisma!.arbitrageOpportunity.findMany({
+        where: { status: 'ACTIVE' },
+        orderBy: { profitCents: 'desc' },
+      });
+      
+      return opportunities.map(this.mapDbToOpportunity);
+    }
     
-    return opportunities.map(this.mapDbToOpportunity);
+    // Fallback to in-memory
+    return Array.from(inMemoryStore.opportunities.values())
+      .filter(o => o.status === 'ACTIVE')
+      .sort((a, b) => b.profitCents - a.profitCents);
   }
   
   /**
@@ -229,26 +322,54 @@ export class ArbitrageService {
     status?: string;
     minProfitCents?: number;
   }): Promise<ArbitrageOpportunity[]> {
-    const opportunities = await requirePrisma().arbitrageOpportunity.findMany({
-      where: {
-        ...(params?.type && { type: params.type as any }),
-        ...(params?.status && { status: params.status as any }),
-        ...(params?.minProfitCents && { profitCents: { gte: params.minProfitCents } }),
-      },
-      orderBy: { detectedAt: 'desc' },
-      take: params?.limit || 100,
-    });
+    if (this.isDatabaseAvailable()) {
+      const opportunities = await prisma!.arbitrageOpportunity.findMany({
+        where: {
+          ...(params?.type && { type: params.type as any }),
+          ...(params?.status && { status: params.status as any }),
+          ...(params?.minProfitCents && { profitCents: { gte: params.minProfitCents } }),
+        },
+        orderBy: { detectedAt: 'desc' },
+        take: params?.limit || 100,
+      });
+      
+      return opportunities.map(this.mapDbToOpportunity);
+    }
     
-    return opportunities.map(this.mapDbToOpportunity);
+    // Fallback to in-memory
+    let opportunities = Array.from(inMemoryStore.opportunities.values());
+    
+    if (params?.type) {
+      opportunities = opportunities.filter(o => o.type === params.type);
+    }
+    if (params?.status) {
+      opportunities = opportunities.filter(o => o.status === params.status);
+    }
+    if (params?.minProfitCents) {
+      opportunities = opportunities.filter(o => o.profitCents >= params.minProfitCents!);
+    }
+    
+    return opportunities
+      .sort((a, b) => new Date(b.detectedAt).getTime() - new Date(a.detectedAt).getTime())
+      .slice(0, params?.limit || 100);
   }
   
   /**
    * Execute an arbitrage opportunity by buying both YES and NO
    */
   async executeOpportunity(request: ArbitrageExecuteRequest): Promise<ArbitrageExecuteResult> {
-    const opportunity = await requirePrisma().arbitrageOpportunity.findUnique({
-      where: { id: request.opportunityId },
-    });
+    let opportunity: ArbitrageOpportunity | null = null;
+    
+    if (this.isDatabaseAvailable()) {
+      const dbOpp = await prisma!.arbitrageOpportunity.findUnique({
+        where: { id: request.opportunityId },
+      });
+      if (dbOpp) {
+        opportunity = this.mapDbToOpportunity(dbOpp);
+      }
+    } else {
+      opportunity = inMemoryStore.opportunities.get(request.opportunityId) || null;
+    }
     
     if (!opportunity) {
       return { success: false, opportunityId: request.opportunityId, error: 'Opportunity not found' };
@@ -283,15 +404,26 @@ export class ArbitrageService {
       const expectedProfit = Number(opportunity.profitCents) * request.contracts;
       
       // Update opportunity as executed
-      await requirePrisma().arbitrageOpportunity.update({
-        where: { id: request.opportunityId },
-        data: {
-          status: 'EXECUTED',
-          executedAt: new Date(),
+      if (this.isDatabaseAvailable()) {
+        await prisma!.arbitrageOpportunity.update({
+          where: { id: request.opportunityId },
+          data: {
+            status: 'EXECUTED',
+            executedAt: new Date(),
+            executedContracts: request.contracts,
+            actualProfit: expectedProfit,
+          },
+        });
+      } else {
+        const updated = {
+          ...opportunity,
+          status: 'EXECUTED' as const,
+          executedAt: new Date().toISOString(),
           executedContracts: request.contracts,
           actualProfit: expectedProfit,
-        },
-      });
+        };
+        inMemoryStore.opportunities.set(request.opportunityId, updated);
+      }
       
       return {
         success: true,
@@ -305,10 +437,17 @@ export class ArbitrageService {
       };
     } catch (error) {
       // Mark as missed if we couldn't execute
-      await requirePrisma().arbitrageOpportunity.update({
-        where: { id: request.opportunityId },
-        data: { status: 'MISSED' },
-      });
+      if (this.isDatabaseAvailable()) {
+        await prisma!.arbitrageOpportunity.update({
+          where: { id: request.opportunityId },
+          data: { status: 'MISSED' },
+        });
+      } else {
+        const existing = inMemoryStore.opportunities.get(request.opportunityId);
+        if (existing) {
+          inMemoryStore.opportunities.set(request.opportunityId, { ...existing, status: 'MISSED' });
+        }
+      }
       
       return {
         success: false,
@@ -329,30 +468,46 @@ export class ArbitrageService {
     executedCount: number;
     totalActualProfit: number;
   }> {
-    const [scans, opportunities, executed] = await Promise.all([
-      requirePrisma().arbitrageScan.aggregate({
-        _count: true,
-        _sum: { opportunitiesFound: true, totalProfitPotential: true },
-      }),
-      requirePrisma().arbitrageOpportunity.aggregate({
-        _count: true,
-        _avg: { profitCents: true },
-        _sum: { profitCents: true },
-      }),
-      requirePrisma().arbitrageOpportunity.aggregate({
-        where: { status: 'EXECUTED' },
-        _count: true,
-        _sum: { actualProfit: true },
-      }),
-    ]);
+    if (this.isDatabaseAvailable()) {
+      const [scans, opportunities, executed] = await Promise.all([
+        prisma!.arbitrageScan.aggregate({
+          _count: true,
+          _sum: { opportunitiesFound: true, totalProfitPotential: true },
+        }),
+        prisma!.arbitrageOpportunity.aggregate({
+          _count: true,
+          _avg: { profitCents: true },
+          _sum: { profitCents: true },
+        }),
+        prisma!.arbitrageOpportunity.aggregate({
+          where: { status: 'EXECUTED' },
+          _count: true,
+          _sum: { actualProfit: true },
+        }),
+      ]);
+      
+      return {
+        totalScans: scans._count,
+        totalOpportunities: opportunities._count,
+        avgProfitCents: Number(opportunities._avg?.profitCents || 0),
+        totalProfitPotential: Number(opportunities._sum?.profitCents || 0),
+        executedCount: executed._count,
+        totalActualProfit: Number(executed._sum?.actualProfit || 0),
+      };
+    }
+    
+    // Fallback to in-memory
+    const opportunities = Array.from(inMemoryStore.opportunities.values());
+    const executed = opportunities.filter(o => o.status === 'EXECUTED');
+    const totalProfit = opportunities.reduce((sum, o) => sum + o.profitCents, 0);
     
     return {
-      totalScans: scans._count,
-      totalOpportunities: opportunities._count,
-      avgProfitCents: Number(opportunities._avg?.profitCents || 0),
-      totalProfitPotential: Number(opportunities._sum?.profitCents || 0),
-      executedCount: executed._count,
-      totalActualProfit: Number(executed._sum?.actualProfit || 0),
+      totalScans: inMemoryStore.scans.length,
+      totalOpportunities: opportunities.length,
+      avgProfitCents: opportunities.length > 0 ? totalProfit / opportunities.length : 0,
+      totalProfitPotential: totalProfit,
+      executedCount: executed.length,
+      totalActualProfit: executed.reduce((sum, o) => sum + (o.actualProfit || 0), 0),
     };
   }
   
@@ -360,7 +515,11 @@ export class ArbitrageService {
    * Check if alerts should be sent for high-value opportunities
    */
   async checkAlerts(): Promise<ArbitrageOpportunity[]> {
-    const config = await requirePrisma().arbitrageAlertConfig.findFirst({
+    if (!this.isDatabaseAvailable()) {
+      return []; // Alerts not supported without database
+    }
+    
+    const config = await prisma!.arbitrageAlertConfig.findFirst({
       where: { isActive: true },
     });
     
@@ -368,7 +527,7 @@ export class ArbitrageService {
       return [];
     }
     
-    const opportunities = await requirePrisma().arbitrageOpportunity.findMany({
+    const opportunities = await prisma!.arbitrageOpportunity.findMany({
       where: {
         status: 'ACTIVE',
         alertSent: false,
@@ -379,7 +538,7 @@ export class ArbitrageService {
     
     // Mark alerts as sent
     if (opportunities.length > 0) {
-      await requirePrisma().arbitrageOpportunity.updateMany({
+      await prisma!.arbitrageOpportunity.updateMany({
         where: { id: { in: opportunities.map(o => o.id) } },
         data: { alertSent: true, alertSentAt: new Date() },
       });

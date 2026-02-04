@@ -2,24 +2,23 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { ArbitrageService } from '../services/ArbitrageService';
 import type { Market } from '../lib/kalshi';
 
-// Create mock storage for testing
-const mockOpportunities: Map<string, any> = new Map();
-const mockScans: any[] = [];
-const mockAlertConfig = { isActive: true, alertEnabled: true, minProfitCents: 1, minProfitPercent: 1 };
-
-// Mock the prisma client
-vi.mock('../lib/prisma', () => ({
-  requirePrisma: () => ({
+// Hoisted mock storage and instance
+const { mockOpportunities, mockScans, mockAlertConfig, mockPrismaInstance } = vi.hoisted(() => {
+  const mockOpportunities: Map<string, any> = new Map();
+  const mockScans: any[] = [];
+  const mockAlertConfig = { isActive: true, alertEnabled: true, minProfitCents: 1, minProfitPercent: 1 };
+  
+  const mockPrismaInstance = {
     arbitrageOpportunity: {
-      findFirst: vi.fn().mockImplementation(async ({ where }) => {
-        for (const [id, opp] of mockOpportunities) {
+      findFirst: vi.fn(async ({ where }: any) => {
+        for (const [, opp] of mockOpportunities) {
           if (where.marketTicker === opp.marketTicker && where.status === opp.status) {
             return opp;
           }
         }
         return null;
       }),
-      findMany: vi.fn().mockImplementation(async ({ where, orderBy, take }) => {
+      findMany: vi.fn(async ({ where, orderBy, take }: any) => {
         let results = Array.from(mockOpportunities.values());
         if (where?.status) {
           results = results.filter(o => o.status === where.status);
@@ -47,10 +46,17 @@ vi.mock('../lib/prisma', () => ({
         }
         return results;
       }),
-      findUnique: vi.fn().mockImplementation(async ({ where }) => {
-        return mockOpportunities.get(where.id) || null;
+      findUnique: vi.fn(async ({ where }: any) => {
+        const opp = mockOpportunities.get(where.id);
+        if (!opp) return null;
+        // Add default date fields if missing
+        return {
+          ...opp,
+          detectedAt: opp.detectedAt || new Date(),
+          lastSeenAt: opp.lastSeenAt || new Date(),
+        };
       }),
-      create: vi.fn().mockImplementation(async ({ data }) => {
+      create: vi.fn(async ({ data }: any) => {
         const id = `opp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
         const created = {
           id,
@@ -62,14 +68,14 @@ vi.mock('../lib/prisma', () => ({
         mockOpportunities.set(id, created);
         return created;
       }),
-      update: vi.fn().mockImplementation(async ({ where, data }) => {
+      update: vi.fn(async ({ where, data }: any) => {
         const opp = mockOpportunities.get(where.id);
         if (!opp) return null;
         const updated = { ...opp, ...data };
         mockOpportunities.set(where.id, updated);
         return updated;
       }),
-      updateMany: vi.fn().mockImplementation(async ({ where, data }) => {
+      updateMany: vi.fn(async ({ where, data }: any) => {
         let count = 0;
         for (const [id, opp] of mockOpportunities) {
           let match = true;
@@ -84,7 +90,7 @@ vi.mock('../lib/prisma', () => ({
         }
         return { count };
       }),
-      aggregate: vi.fn().mockImplementation(async ({ where }) => {
+      aggregate: vi.fn(async ({ where }: any) => {
         let results = Array.from(mockOpportunities.values());
         if (where?.status) {
           results = results.filter(o => o.status === where.status);
@@ -99,12 +105,12 @@ vi.mock('../lib/prisma', () => ({
       }),
     },
     arbitrageScan: {
-      create: vi.fn().mockImplementation(async ({ data }) => {
+      create: vi.fn(async ({ data }: any) => {
         const scan = { id: `scan-${Date.now()}`, ...data };
         mockScans.push(scan);
         return scan;
       }),
-      aggregate: vi.fn().mockImplementation(async () => {
+      aggregate: vi.fn(async () => {
         const oppFound = mockScans.reduce((sum, s) => sum + (s.opportunitiesFound || 0), 0);
         const profitPotential = mockScans.reduce((sum, s) => sum + (s.totalProfitPotential || 0), 0);
         return {
@@ -114,11 +120,19 @@ vi.mock('../lib/prisma', () => ({
       }),
     },
     arbitrageAlertConfig: {
-      findFirst: vi.fn().mockImplementation(async () => mockAlertConfig),
+      findFirst: vi.fn(async () => mockAlertConfig),
     },
-  }),
-  prisma: null,
-}));
+  };
+  
+  return { mockOpportunities, mockScans, mockAlertConfig, mockPrismaInstance };
+});
+
+vi.mock('../lib/prisma', () => ({
+  default: mockPrismaInstance,
+  prisma: mockPrismaInstance,
+  requirePrisma: () => mockPrismaInstance,
+  isPrismaAvailable: () => true,
+}))
 
 // Mock the Kalshi API
 vi.mock('../lib/kalshi', () => ({
